@@ -456,10 +456,81 @@ def is_discrete_variable(series):
     return np.all(np.isclose(s, np.round(s)))
 
 def get_point_id_from_customdata(customdata):
+    """
+    Extract the stable row index i from Plotly customdata.
+
+    Supported payloads:
+      customdata = i
+      customdata = [i]
+      customdata = [i, extra_value]
+
+    Scientific notation:
+      i identifies observation x_i in the server-side dataframe.
+    """
+    if customdata is None:
+        return None
+
     arr = np.asarray(customdata)
+
     if arr.ndim == 0:
         return int(arr)
-    return int(arr[0])
+
+    if arr.size == 0:
+        return None
+
+    return int(arr.flat[0])
+
+
+def get_customdata_from_figure_point(point, figure):
+    """
+    Recover customdata from the rendered figure when Dash/Plotly omits it
+    from clickData or selectedData.
+
+    Event geometry:
+      curveNumber = trace index k
+      pointNumber/pointIndex = point index j within trace k
+      customdata[k][j] -> point_id i
+    """
+    if not figure:
+        return None
+
+    curve_number = point.get("curveNumber")
+    point_number = point.get("pointNumber", point.get("pointIndex"))
+
+    if curve_number is None or point_number is None:
+        return None
+
+    traces = figure.get("data", [])
+
+    if curve_number >= len(traces):
+        return None
+
+    customdata = traces[curve_number].get("customdata")
+
+    if customdata is None:
+        return None
+
+    try:
+        return customdata[point_number]
+    except (IndexError, TypeError):
+        return None
+
+
+def get_point_id_from_event_point(point, figure=None):
+    """
+    Extract point_id from a Dash/Plotly event point.
+
+    Prefer the event payload. Fall back to the full figure because newer
+    Plotly/Dash versions may omit customdata from event data.
+    """
+    point_id = get_point_id_from_customdata(point.get("customdata"))
+
+    if point_id is not None:
+        return point_id
+
+    return get_point_id_from_customdata(
+        get_customdata_from_figure_point(point, figure)
+    )
 
 # ========================
 # App Layout 
@@ -1363,15 +1434,17 @@ def register_callbacks(app: dash.Dash) -> None:
         selected_ids = set()
         if trigger == "main_plot" and scatter_sel and scatter_sel.get("points"):
             selected_ids = {
-                get_point_id_from_customdata(p["customdata"])
+                point_id
                 for p in scatter_sel["points"]
-                if p.get("customdata") is not None
+                for point_id in [get_point_id_from_event_point(p, fig_scatter)]
+                if point_id is not None
             }
         elif trigger == "ts_plot" and ts_sel and ts_sel.get("points"):
             selected_ids = {
-                get_point_id_from_customdata(p["customdata"])
+                point_id
                 for p in ts_sel["points"]
-                if p.get("customdata") is not None
+                for point_id in [get_point_id_from_event_point(p, fig_ts)]
+                if point_id is not None
             }
         # --- Apply selection to both figures ---
         ids = np.asarray(list(selected_ids), dtype=np.int32)
@@ -1379,11 +1452,12 @@ def register_callbacks(app: dash.Dash) -> None:
             for i, trace in enumerate(fig.get("data", [])):
                 if "customdata" not in trace:
                     continue
-                customdata = np.asarray(trace["customdata"])
-                if customdata.ndim == 1:
-                    custom_ids = customdata.astype(np.int32)
-                else:
-                    custom_ids = customdata[:, 0].astype(np.int32)
+                custom_ids = [
+                    point_id
+                    for customdata in trace["customdata"]
+                    for point_id in [get_point_id_from_customdata(customdata)]
+                    if point_id is not None
+                ]
                 mask = np.isin(custom_ids, ids)
                 selected_idx = np.nonzero(mask)[0]
                 patch["data"][i]["selectedpoints"] = (
@@ -1395,16 +1469,18 @@ def register_callbacks(app: dash.Dash) -> None:
     @app.callback(
         Output('main_plot_selected_data', 'data'),
         Input('main_plot', 'selectedData'),
+        State('main_plot', 'figure'),
         prevent_initial_call=True
     )
-    def store_scatter_selection_indices(selectedData):
+    def store_scatter_selection_indices(selectedData, main_figure):
         """Store IDs of selected points in main scatter plot."""
         if not selectedData or "points" not in selectedData:
             return None
         selected_ids = [
-            get_point_id_from_customdata(p["customdata"])
+            point_id
             for p in selectedData["points"]
-            if p.get("customdata") is not None
+            for point_id in [get_point_id_from_event_point(p, main_figure)]
+            if point_id is not None
         ]
         return {"selected_ids": selected_ids}
 
@@ -2312,12 +2388,13 @@ def register_callbacks(app: dash.Dash) -> None:
     @app.callback(
         Output('click-output', 'children'),
         Input('main_plot', 'clickData'),
+        State('main_plot', 'figure'),
         State('dataset_selector', 'value'),
         State('csv_selector', 'value'),
         State('sub_sample', 'value'),
         State('sampling_mode', 'value'),
     )
-    def display_click_data(clickData, dataset, csv_file, sub_sample, sampling_mode):
+    def display_click_data(clickData, main_figure, dataset, csv_file, sub_sample, sampling_mode):
         """
         Display detailed information for a clicked point in the main scatter plot.
         Fetches the full row server-side using point_id.
@@ -2325,7 +2402,12 @@ def register_callbacks(app: dash.Dash) -> None:
         if not clickData or not clickData.get("points"):
             return "Click on a point to see full details."
         try:
-            point_id = get_point_id_from_customdata(clickData["points"][0]["customdata"])
+            clicked_point = clickData["points"][0]
+            point_id = get_point_id_from_event_point(clicked_point, main_figure)
+
+            if point_id is None:
+                return "Click on a data point to see full details."
+
             df = load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
             if point_id not in df.index:
                 return "Point no longer in filtered dataset."
