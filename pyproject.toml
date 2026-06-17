@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stingray-dashboard"
+version = "2.0.0"
+description = "Installable Dash application for the NES-LTER Stingray dashboard"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "Anh Pham" },
+    { name = "Sidney Batchelder" },
+    { name = "Heidi Sosik" },
+]
+keywords = [
+    "NES-LTER",
+    "Stingray",
+    "ISIIS",
+    "oceanography",
+    "dashboard",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "dash>=3",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "plotly>=5",
+]
+
+[project.urls]
+Homepage = "https://github.com/anhph95/StingrayTools"
+Repository = "https://github.com/anhph95/StingrayTools"
+Issues = "https://github.com/anhph95/StingrayTools/issues"
+
+[project.scripts]
+stingray-dashboard = "stingray_dashboard.app:main"
+
+[project.optional-dependencies]
+server = [
+    "gunicorn>=21; platform_system != 'Windows'",
+]
+
+dev = [
+    "pytest>=8",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["stingray_dashboard*"]
+
+[tool.setuptools.package-data]
+stingray_dashboard = [
+    "assets/*",
+]

@@ -1,0 +1,336 @@
+/* ==========================================================
+   GLOBAL PAGE SETTINGS
+   ========================================================== */
+
+/* Base page style */
+body {
+  font-family: Arial, sans-serif;   /* global font */
+  margin: 0;
+  padding: 0;
+  background-color: #fff;           /* white background */
+  overflow-x: auto;                 /* allow horizontal scroll if layout overflows */
+}
+
+/* Dash container wrapper */
+._dash-container {
+  max-width: 1400px;                /* center content with max width */
+  margin: auto;
+  padding: 6px;
+}
+
+/* Headings */
+h1, h2, h3 {
+  color: #183554;                   /* WHOI dark blue */
+}
+
+
+/* ==========================================================
+   FLEX LAYOUT UTILITIES
+   ========================================================== */
+
+/* Horizontal layout */
+.flex-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Vertical layout */
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* ==========================================================
+   PANELS & CARDS
+   ========================================================== */
+
+/* Generic control panel */
+.panel {
+  background-color: #f8f8f8;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  padding: 10px;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+/* Information cards (right panel) */
+.card {
+  background-color: #fff;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+
+/* ==========================================================
+   HEADER + FOOTER (FULL WIDTH BARS)
+   ========================================================== */
+
+/* Shared header/footer layout */
+.header-top,
+.header-sub,
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  width: 100vw;                     /* stretch across full browser width */
+  margin-left: calc(50% - 50vw);    /* escape Dash container centering */
+
+  padding: 6px 24px;
+  box-sizing: border-box;
+}
+
+/* Top dark banner */
+.header-top {
+  background-color: #183554;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+
+/* Secondary white header */
+.header-sub {
+  background-color: #fff;
+  padding: 8px 24px;
+  margin-bottom: 10px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Main title */
+.header-title {
+  color: #183554;
+  font-size: 28px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+/* Footer bar */
+.footer {
+  background-color: #183554;
+  color: white;
+  padding: 6px 24px;
+  font-size: 13px;
+  box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+}
+
+
+/* ==========================================================
+   BUTTONS
+   ========================================================== */
+
+button {
+  font-size: 14px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  color: #fff;
+  transition: background-color 0.2s ease;
+}
+
+/* Refresh button style */
+#refresh-button {
+  background-color: #007bff;
+  margin-bottom: 6px;
+}
+
+#refresh-button:hover {
+  background-color: #0056b3;
+}
+
+
+/* ==========================================================
+   FORM LABELS & INPUT FIELDS
+   ========================================================== */
+
+/* Section titles */
+.section-label {
+  font-weight: bold;
+  font-size: 16px;
+  color: #183554;
+  margin-bottom: 6px;
+}
+
+/* Field labels */
+label {
+  font-size: 13px;
+  color: #183554;
+}
+
+/* Input boxes */
+input[type="number"],
+input[type="text"],
+select {
+  font-size: 13px;
+  width: 100%;
+  padding: 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+
+/* ==========================================================
+   PLOT CONTAINERS
+   ========================================================== */
+
+/* Cruise track plot (top plot) */
+.cruise-track-graph {
+  width: 100%;
+  height: 320px;        /* default height */
+  margin-bottom: 12px;
+}
+
+/* Main transect plot */
+.main-graph {
+  width: 100%;
+  height: 620px;        /* taller main visualization */
+  margin-bottom: 12px;
+}
+
+/* T-S diagram
+   default ratio = 1 : 1.2 */
+.ts-graph {
+  width: 520px;
+  height: 620px;        
+  margin: 0 auto 12px;  /* center horizontally */
+}
+
+/* Profile plot
+   default ratio = 1 : 1.5 */
+.profile-graph {
+  width: 520px;
+  height: 780px;        /* 520 × 1.5 */
+  margin: 0 auto 12px;
+}
+
+
+/* ==========================================================
+   PANEL WIDTH STRUCTURE
+   ========================================================== */
+
+/* Left control panel */
+.left-panel {
+  flex: 0 0 240px;
+  min-width: 240px;
+  max-width: 240px;
+}
+
+/* Middle plot area */
+.middle-panel {
+  flex: 1;
+  width: 900px;
+  min-width: 860px;
+  max-width: 1040px;
+  margin: 0 10px;
+}
+
+/* Right info panel */
+.right-panel {
+  flex: 0 0 360px;
+  min-width: 360px;
+  max-width: 360px;
+
+  font-size: 13px;
+  color: #183554;
+  line-height: 1.35;
+
+  padding-left: 8px;
+}
+
+/* Right panel titles */
+.right-panel .section-label {
+  font-size: 15px;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+/* Scrollable data card */
+.right-panel .card {
+  font-size: 12.5px;
+  padding: 6px 8px;
+  background-color: #fff;
+  border-radius: 5px;
+
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+
+  max-height: 760px;        /* prevent panel overflow */
+  overflow-y: auto;
+}
+
+
+/* ==========================================================
+   RESPONSIVE BEHAVIOR
+   ========================================================== */
+
+/* Medium screens */
+@media (max-width: 1200px) {
+
+  ._dash-container {
+    max-width: 100%;
+  }
+
+  .middle-panel {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+  }
+
+  .left-panel {
+    flex: 0 0 200px;
+    min-width: 200px;
+  }
+
+  .right-panel {
+    flex: 0 0 300px;
+    min-width: 300px;
+  }
+}
+
+/* Small screens (stack layout) */
+@media (max-width: 900px) {
+
+  .flex-row {
+    flex-direction: column;
+  }
+
+  .left-panel,
+  .middle-panel,
+  .right-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 100%;
+  }
+
+  .ts-graph,
+  .profile-graph {
+    max-width: 100%;
+  }
+}
+
+
+/* ==========================================================
+   RESIZABLE PLOT CONTAINERS
+   ========================================================== */
+
+/* Allows manual resizing with mouse drag */
+.resizable {
+  resize: both;
+  overflow: auto;
+}
+
+
+/* ==========================================================
+   PLOTLY RENDERING FIX
+   ========================================================== */
+
+/* Ensures Plotly plots always fill their container
+   after CSS resizing */
+.js-plotly-plot {
+  width: 100% !important;
+  height: 100% !important;
+}
