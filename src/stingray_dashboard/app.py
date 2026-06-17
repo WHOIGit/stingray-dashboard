@@ -532,6 +532,34 @@ def get_point_id_from_event_point(point, figure=None):
         get_customdata_from_figure_point(point, figure)
     )
 
+
+def get_row_by_point_id(df: pd.DataFrame, point_id: int) -> pd.Series | None:
+    """
+    Recover observation x_i by stable point_id i.
+
+    Prefer the explicit point_id column because filtering, averaging, and
+    Plotly serialization can make the dataframe index differ from the plotted
+    identifier.
+    """
+    if df.empty:
+        return None
+
+    if "point_id" in df.columns:
+        matches = df.loc[df["point_id"] == point_id]
+
+        if not matches.empty:
+            return matches.iloc[0]
+
+    if point_id in df.index:
+        row = df.loc[point_id]
+
+        if isinstance(row, pd.DataFrame):
+            return row.iloc[0]
+
+        return row
+
+    return None
+
 # ========================
 # App Layout 
 # ========================
@@ -2409,9 +2437,11 @@ def register_callbacks(app: dash.Dash) -> None:
                 return "Click on a data point to see full details."
 
             df = load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
-            if point_id not in df.index:
+            row = get_row_by_point_id(df, point_id)
+
+            if row is None:
                 return "Point no longer in filtered dataset."
-            row = df.loc[point_id]
+
             def clean(value, default=None):
                 if value is None or value == "":
                     return default
