@@ -131,6 +131,24 @@ def ies80(s, t, p=0):
     return rho
 
 
+@lru_cache(maxsize=32)
+def density_grid(tmin, tmax, smin, smax):
+    """
+    Cache potential density anomaly contours for the T-S diagram.
+
+    Scientific relation:
+      sigma_theta(S, T) = rho(S, T, p=0) - 1000 kg m^-3
+
+    The grid depends only on the displayed salinity and temperature bounds,
+    so color-variable changes can reuse the same contour field.
+    """
+    t_values = np.arange(tmin, tmax, 0.5)
+    s_values = np.arange(smin, smax, 0.5)
+    T, S = np.meshgrid(t_values, s_values, indexing="ij")
+    D = ies80(S, T, 0) - 1000
+    return t_values, s_values, D
+
+
 # ============================================
 # File Utilities
 # ============================================
@@ -229,8 +247,8 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
     # RAW DATA CACHE
     # =========================================================
     if base_key not in DATA_CACHE:
+        # Read the dataset once; downstream steps normalize columns and types.
         df = pd.read_csv(csv_path, low_memory=False)
-        df = pd.read_csv(csv_path, low_memory=True)
         df = canonicalize_columns(df)
         # downcast for memory efficiency
         int_cols = df.select_dtypes(include=["int64"]).columns
@@ -567,9 +585,16 @@ def make_layout() -> html.Div:
     datasets = scan_datasets()
     selected_dataset = choose_default_dataset(datasets)
     csv_files = get_csv_files(selected_dataset) if selected_dataset else []
-    df = load_data(selected_dataset, csv_files[-1]) if csv_files else pd.DataFrame()
+    if csv_files:
+        # Sample only enough rows to canonicalize names while preserving all
+        # CSV columns for dropdown choices.
+        csv_path = DATA_DIR / selected_dataset / f"{csv_files[-1]}.csv"
+        df = pd.read_csv(csv_path, nrows=1000, low_memory=True)
+        df = canonicalize_columns(df)
+    else:
+        df = pd.DataFrame()
     sensor_vars = [
-        col for col in df.select_dtypes(include=[np.number]).columns
+        col for col in df.columns
         if "_std" not in col and col not in meta_vars
     ] if not df.empty else []
     default_color_var = (
@@ -1169,7 +1194,7 @@ def register_callbacks(app: dash.Dash) -> None:
             dfi = pd.read_csv(csv_path, nrows=1000, low_memory=True)
             dfi = canonicalize_columns(dfi)
             SENSOR_VAR_CACHE[csv_path] = [
-                c for c in dfi.select_dtypes(include=[np.number]).columns
+                c for c in dfi.columns
                 if "_std" not in c and c not in meta_vars
             ]
         sensor_vars = SENSOR_VAR_CACHE[csv_path]
@@ -1406,18 +1431,22 @@ def register_callbacks(app: dash.Dash) -> None:
         State("cruise_track_selection_store", "data"),
         prevent_initial_call=True,
     )
-    def persist_cruise_track_selection(selectedData, dataset, csv_file, sub_sample, sampling_mode, prev):
+    def persist_cruise_track_selection(
+        selectedData, dataset, csv_file, sub_sample, sampling_mode, prev
+    ):
         if not csv_file:
             raise dash.exceptions.PreventUpdate
         prev = prev or {}
         trigger = ctx.triggered_id
         this_key = f"{dataset}/{csv_file}/{sub_sample}/{sampling_mode}"
         last_key = prev.get("_key")
-        df = load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
         if trigger in ("dataset_selector", "csv_selector", "sub_sample", "sampling_mode"):
             if last_key == this_key:
                 return prev
-            return {"selected_ids": df.index.astype(int).tolist(), "_key": this_key}
+            # All observations are selected by default:
+            # S = {i : i is a point_id in the active dataframe}.
+            return {"mode": "all", "selected_ids": None, "_key": this_key}
+
         if trigger == "cruise_track":
             if selectedData and selectedData.get("points"):
                 ids = [
@@ -1425,10 +1454,11 @@ def register_callbacks(app: dash.Dash) -> None:
                     for p in selectedData["points"]
                     if p.get("meta") is not None
                 ]
-                return {"selected_ids": ids, "_key": this_key}
-            # Selection was cleared by resizing/changing the box.
-            # Treat that as "all points selected" so dependent plots update.
-            return {"selected_ids": df.index.astype(int).tolist(), "_key": this_key}
+                return {"mode": "ids", "selected_ids": ids, "_key": this_key}
+
+            # Clearing the cruise-track selection restores all observations:
+            # S = {i : i is a point_id in the active dataframe}.
+            return {"mode": "all", "selected_ids": None, "_key": this_key}
         raise dash.exceptions.PreventUpdate
 
     # --- Callback: Mirror selections between main scatter and TS plots ---
@@ -1594,7 +1624,11 @@ def register_callbacks(app: dash.Dash) -> None:
             mode=sampling_mode
         )
         # Apply cruise-track point selection, if present.
-        if cruise_track_selection and "selected_ids" in cruise_track_selection:
+        if (
+            cruise_track_selection
+            and cruise_track_selection.get("mode") != "all"
+            and cruise_track_selection.get("selected_ids") is not None
+        ):
             ids = np.asarray(
                 cruise_track_selection["selected_ids"],
                 dtype=np.int32
@@ -2028,7 +2062,11 @@ def register_callbacks(app: dash.Dash) -> None:
         # --------------------------------------------------------
         # 2️⃣ Apply Cruise Track Selection
         # --------------------------------------------------------
-        if cruise_track_selection and "selected_ids" in cruise_track_selection:
+        if (
+            cruise_track_selection
+            and cruise_track_selection.get("mode") != "all"
+            and cruise_track_selection.get("selected_ids") is not None
+        ):
             ids = np.asarray(cruise_track_selection["selected_ids"], dtype=np.int32)
             mask = np.isin(df["point_id"].to_numpy(), ids)
             df = df.loc[mask]
@@ -2050,12 +2088,7 @@ def register_callbacks(app: dash.Dash) -> None:
         tmax += 2
         smin -= 2
         smax += 2
-        T, S = np.meshgrid(
-            np.arange(tmin, tmax, 0.5),
-            np.arange(smin, smax, 0.5),
-            indexing='ij'
-        )
-        D = ies80(S, T, 0) - 1000
+        t_values, s_values, D = density_grid(tmin, tmax, smin, smax)
         # --------------------------------------------------------
         # 5️⃣ Configure Color Range
         # --------------------------------------------------------
@@ -2105,8 +2138,8 @@ def register_callbacks(app: dash.Dash) -> None:
         fig.add_trace(
             go.Contour(
                 z=D,
-                x=np.arange(smin, smax, 0.5),
-                y=np.arange(tmin, tmax, 0.5),
+                x=s_values,
+                y=t_values,
                 colorscale=[[0, 'black'], [1, 'black']],
                 contours=dict(
                     coloring='lines',
@@ -2229,7 +2262,11 @@ def register_callbacks(app: dash.Dash) -> None:
                 font=dict(size=16, color="red"),
             )
             return fig
-        if cruise_track_selection and "selected_ids" in cruise_track_selection:
+        if (
+            cruise_track_selection
+            and cruise_track_selection.get("mode") != "all"
+            and cruise_track_selection.get("selected_ids") is not None
+        ):
             ids = np.asarray(cruise_track_selection["selected_ids"], dtype=np.int32)
             mask = np.isin(df["point_id"].to_numpy(), ids)
             df = df.loc[mask]
