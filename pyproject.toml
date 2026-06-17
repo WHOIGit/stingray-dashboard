@@ -27,10 +27,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "dash>=3",
+    "dash>=3.2,<4",
     "numpy>=1.26",
     "pandas>=2.0",
-    "plotly>=5",
+    "plotly>=5.24,<6",
 ]
 
 [project.urls]
