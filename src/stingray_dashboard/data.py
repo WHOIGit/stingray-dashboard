@@ -24,6 +24,7 @@ MAX_AVG_CACHE = 8
 stations: pd.DataFrame | None = None
 bathy: pd.DataFrame | None = None
 
+
 def get_link(media, frame):
     if media is not None and frame is not None:
         return f"https://stingraydash.whoi.edu/fv/frames/{media}/{frame}?format=png"
@@ -266,8 +267,18 @@ def init_data_dirs(work_dir: str | Path | None = None) -> None:
 def load_auxiliary_data() -> None:
     global stations, bathy
 
-    stations = load_csv(MISC_DIR / "NESLTER_station_list.csv")
-    bathy = load_csv(MISC_DIR / "NESLTER_transect_bathymetry.csv")
+    # Workspace reference tables override the copies installed with the package.
+    package_reference_dir = Path(__file__).resolve().parent / "data_reference"
+    station_path = MISC_DIR / "NESLTER_station_list.csv"
+    bathymetry_path = MISC_DIR / "NESLTER_transect_bathymetry.csv"
+
+    if not station_path.exists():
+        station_path = package_reference_dir / station_path.name
+    if not bathymetry_path.exists():
+        bathymetry_path = package_reference_dir / bathymetry_path.name
+
+    stations = load_csv(station_path)
+    bathy = load_csv(bathymetry_path)
 
     if stations is not None:
         stations["latitude"] = pd.to_numeric(stations["latitude"], errors="coerce")

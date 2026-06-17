@@ -61,4 +61,5 @@ include = ["stingray_dashboard*"]
 [tool.setuptools.package-data]
 stingray_dashboard = [
     "assets/*",
+    "data_reference/*",
 ]
