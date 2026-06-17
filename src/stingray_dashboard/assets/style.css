@@ -213,20 +213,126 @@ select {
    PANEL WIDTH STRUCTURE
    ========================================================== */
 
-/* Left control panel */
-.left-panel {
+/* Main plot/control workspace */
+.global-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.global-panel {
+  display: block;
+  padding: 6px 8px;
+  margin-bottom: 0;
+}
+
+.global-panel .section-label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.global-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 145px));
+  align-items: end;
+  gap: 10px;
+}
+
+.global-panel .global-fields {
+  grid-template-columns:
+    minmax(140px, 1.2fr)
+    minmax(140px, 1.2fr)
+    repeat(6, minmax(96px, 130px))
+    minmax(70px, 90px)
+    auto;
+}
+
+.global-panel label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#refresh-button {
+  align-self: end;
+  justify-self: end;
+  width: auto;
+  min-width: 90px;
+}
+
+.dashboard-body {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.plot-workspace {
+  width: 100%;
+  min-width: 860px;
+}
+
+.plot-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.plot-controls {
   flex: 0 0 240px;
   min-width: 240px;
   max-width: 240px;
+  margin-bottom: 0;
+  overflow-y: auto;
 }
 
-/* Middle plot area */
-.middle-panel {
-  flex: 1;
+.plot-area {
+  min-width: 0;
+}
+
+.right-slot {
+  flex: 0 0 360px;
+  min-width: 360px;
+  max-width: 360px;
+}
+
+#track_container.plot-area {
+  flex: 0 0 auto;
   width: 900px;
-  min-width: 860px;
-  max-width: 1040px;
-  margin: 0 10px;
+  height: 320px;
+}
+
+#main_container.plot-area {
+  flex: 0 0 auto;
+  width: 900px;
+  height: 620px;
+}
+
+#ts_container.plot-area {
+  flex: 0 0 560px;
+  width: 560px;
+  height: 560px;
+  margin: 0 auto 12px;
+}
+
+#profile_container.plot-area {
+  flex: 0 0 520px;
+  width: 520px;
+  height: 780px;
+  margin: 0 auto 12px;
+}
+
+#track_container.plot-area,
+#main_container.plot-area,
+#ts_container.plot-area,
+#profile_container.plot-area {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.control-field {
+  margin-bottom: 6px;
 }
 
 /* Right info panel */
@@ -274,20 +380,17 @@ select {
     max-width: 100%;
   }
 
-  .middle-panel {
+  .plot-workspace {
     width: 100%;
     min-width: 100%;
     max-width: 100%;
   }
 
-  .left-panel {
-    flex: 0 0 200px;
-    min-width: 200px;
-  }
-
+  .right-slot,
   .right-panel {
     flex: 0 0 300px;
     min-width: 300px;
+    max-width: 300px;
   }
 }
 
@@ -298,29 +401,39 @@ select {
     flex-direction: column;
   }
 
-  .left-panel,
-  .middle-panel,
+  .plot-workspace,
+  .right-slot,
   .right-panel {
     width: 100%;
     max-width: 100%;
     min-width: 100%;
   }
 
+  .plot-row {
+    flex-direction: column;
+  }
+
+  .plot-controls,
+  .dataset-panel,
+  .options-panel,
+  .layout-panel {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+  }
+
+  .global-panel {
+    display: block;
+  }
+
+  .plot-row > .right-slot:empty {
+    display: none;
+  }
+
   .ts-graph,
   .profile-graph {
     max-width: 100%;
   }
-}
-
-
-/* ==========================================================
-   RESIZABLE PLOT CONTAINERS
-   ========================================================== */
-
-/* Allows manual resizing with mouse drag */
-.resizable {
-  resize: both;
-  overflow: auto;
 }
 
 
