@@ -16,12 +16,6 @@ For a Linux server deployment with Gunicorn:
 pip install "stingray-dashboard[server] @ git+https://github.com/anhph95/StingrayTools.git#subdirectory=packages/stingray-dashboard"
 ```
 
-For local development from a cloned repository:
-
-```bash
-pip install -e packages/stingray-dashboard
-```
-
 ## Data Layout
 
 The dashboard reads CSV data from a work directory. By default it uses `/dash_data` when that directory exists, otherwise `./dash_data`.
