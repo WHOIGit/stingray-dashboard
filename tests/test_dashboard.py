@@ -26,6 +26,7 @@ def _write_example_csv(work_dir):
             "longitude": [-70.0, -70.0, -70.0, -70.1, -70.1, -70.1],
             "altitude": [5.0, 9999.99, 4.0, 6.0, 5.0, 4.0],
             "chlorophyll": [1.0, 1.2, 1.4, 0.8, 1.0, 1.2],
+            "sample_type": ["surface", "surface", "deep", "surface", "deep", "deep"],
             "times": pd.date_range("2023-01-01", periods=6, freq="min"),
         }
     )
@@ -203,13 +204,57 @@ def test_cast_coloring_uses_one_continuous_trace(tmp_path):
     assert figure["data"][0]["marker"]["coloraxis"] == "coloraxis"
 
 
-def test_cast_profiles_use_webgl_traces(tmp_path):
-    """Profile rendering should use WebGL for many simultaneous casts."""
+def test_ts_plot_supports_categorical_color_variable(tmp_path):
+    """String color variables should render categories instead of raising."""
+    # Build the application with a categorical sensor-like column.
+    _write_example_csv(tmp_path)
+    app = create_app(tmp_path)
+
+    # Request the T-S plot using strings for marker color.
+    result = _post_callback(
+        app.server.test_client(),
+        "ts_plot.figure",
+        {"id": "ts_plot", "property": "figure"},
+        [
+            ("dataset_selector", "value", "stingray"),
+            ("csv_selector", "value", "example"),
+            ("sub_sample", "value", 1),
+            ("sampling_mode", "value", "subsample"),
+            ("ts_color_variable", "value", "sample_type"),
+            ("ts_color_map", "value", "Plotly"),
+            ("size", "value", 5),
+            ("ts_v_min", "value", None),
+            ("ts_v_max", "value", None),
+            ("hidden_opacity", "value", 0.1),
+            ("plot_font_size", "value", 14),
+            (
+                "cruise_track_selection_store",
+                "data",
+                {"mode": "all", "selected_ids": None},
+            ),
+        ],
+        "ts_color_variable.value",
+    )
+
+    # Categories remain in one WebGL trace and retain point IDs for linking.
+    figure = result["response"]["ts_plot"]["figure"]
+    scatter = figure["data"][0]
+    assert scatter["type"] == "scattergl"
+    assert len(scatter["marker"]["color"]) == 6
+    assert scatter["customdata"][0] == [0, "surface"]
+    assert figure["layout"]["coloraxis"]["colorbar"]["ticktext"] == [
+        "deep",
+        "surface",
+    ]
+
+
+def test_profile_requires_selection_before_plotting_casts(tmp_path):
+    """Profile rendering should not draw every cast before a selection is made."""
     # Build the app around the compact cast dataset.
     _write_example_csv(tmp_path)
     app = create_app(tmp_path)
 
-    # Request profiles for both casts.
+    # Request profiles without selecting points in the main or T-S plot.
     result = _post_callback(
         app.server.test_client(),
         "profile_plot.figure",
@@ -232,7 +277,39 @@ def test_cast_profiles_use_webgl_traces(tmp_path):
         "profile_variable.value",
     )
 
-    # Each cast remains individually selectable while using WebGL rendering.
+    # The profile panel should stay idle instead of drawing every cast.
+    figure = result["response"]["profile_plot"]["figure"]
+    assert figure.get("data", []) == []
+    assert "Select points" in figure["layout"]["annotations"][0]["text"]
+
+
+def test_selected_cast_profiles_use_webgl_traces(tmp_path):
+    """Selected points should expand to their full casts and use WebGL traces."""
+    _write_example_csv(tmp_path)
+    app = create_app(tmp_path)
+
+    result = _post_callback(
+        app.server.test_client(),
+        "profile_plot.figure",
+        {"id": "profile_plot", "property": "figure"},
+        [
+            ("dataset_selector", "value", "stingray"),
+            ("csv_selector", "value", "example"),
+            ("sub_sample", "value", 1),
+            ("sampling_mode", "value", "subsample"),
+            ("profile_variable", "value", "chlorophyll"),
+            ("profile_color_map", "value", "Plotly"),
+            ("plot_font_size", "value", 14),
+            ("main_plot_selected_data", "data", {"selected_ids": [0, 3]}),
+            (
+                "cruise_track_selection_store",
+                "data",
+                {"mode": "all", "selected_ids": None},
+            ),
+        ],
+        "main_plot_selected_data.data",
+    )
+
     figure = result["response"]["profile_plot"]["figure"]
     assert len(figure["data"]) == 2
     assert all(trace["type"] == "scattergl" for trace in figure["data"])

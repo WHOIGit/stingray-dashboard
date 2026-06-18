@@ -63,7 +63,7 @@ def make_layout() -> html.Div:
         dcc.Location(id='url', refresh=False),
         dcc.Store(id="url_restore_done", data=False),
         # --- Auto file scanner ---
-        dcc.Interval(id="file-scan-interval", interval=600 * 1000, n_intervals=0),
+        dcc.Interval(id="file-scan-interval", interval=1800 * 1000, n_intervals=0),
         dcc.Store(id="file-snapshot", data={}),
         # ===== TOP HEADER =====
         html.Div([

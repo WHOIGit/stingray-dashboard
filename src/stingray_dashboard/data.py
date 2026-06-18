@@ -155,7 +155,7 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
     # =========================================================
     if sub_sample is None:
         n_rows = len(df)
-        TARGET_POINTS = 30_000  
+        TARGET_POINTS = 15_000
         if n_rows <= TARGET_POINTS:
             sub_sample = 1
         else:

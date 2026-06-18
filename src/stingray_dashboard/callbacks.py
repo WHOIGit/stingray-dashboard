@@ -1119,12 +1119,70 @@ def register_callbacks(app: dash.Dash) -> None:
         smax += 2
         t_values, s_values, D = density_grid(tmin, tmax, smin, smax)
         # --------------------------------------------------------
-        # 5️⃣ Configure Color Range
+        # 5️⃣ Configure Numeric or Categorical Colors
         # --------------------------------------------------------
-        if vmin is None or vmax is None:
-            q = df[color_var].quantile([0.05, 0.95])
-            vmin = q[0.05] if vmin is None else vmin
-            vmax = q[0.95] if vmax is None else vmax
+        non_null_color = df[color_var].notna()
+        numeric_color = pd.to_numeric(df[color_var], errors="coerce")
+        numeric_color_mode = bool(
+            non_null_color.any()
+            and numeric_color[non_null_color].notna().all()
+        )
+        colorbar_title = color_var.replace("_", " ").capitalize()
+
+        if numeric_color_mode:
+            if vmin is None or vmax is None:
+                q = numeric_color.dropna().quantile([0.05, 0.95])
+                vmin = q[0.05] if vmin is None else vmin
+                vmax = q[0.95] if vmax is None else vmax
+            marker_color = numeric_color
+            customdata = df["point_id"].astype(np.int32).to_numpy()
+            hovertemplate = (
+                "Salinity: %{x:.2f}<br>"
+                "Temperature: %{y:.2f} °C<br>"
+                f"{color_var}: %{{marker.color:.2f}}<extra></extra>"
+            )
+            coloraxis = dict(
+                colorscale=color_map,
+                cmin=vmin,
+                cmax=vmax,
+            )
+            unit = get_unit(color_var)
+            if unit:
+                colorbar_title = f"{colorbar_title} ({unit})"
+        else:
+            labels = df[color_var].fillna("Missing").astype(str)
+            categories = sorted(labels.unique())
+            category_codes = pd.Categorical(
+                labels,
+                categories=categories,
+            ).codes
+            palette, palette_type = get_palette(color_map)
+            if palette_type != "discrete":
+                palette = px.colors.qualitative.Plotly
+            category_colors = [
+                palette[index % len(palette)]
+                for index in range(len(categories))
+            ]
+            discrete_scale = []
+            for index, color in enumerate(category_colors):
+                lower = index / len(categories)
+                upper = (index + 1) / len(categories)
+                discrete_scale.extend([[lower, color], [upper, color]])
+            marker_color = category_codes
+            customdata = np.c_[
+                df["point_id"].astype(np.int32).to_numpy(),
+                labels.to_numpy(),
+            ]
+            hovertemplate = (
+                "Salinity: %{x:.2f}<br>"
+                "Temperature: %{y:.2f} °C<br>"
+                f"{color_var}: %{{customdata[1]}}<extra></extra>"
+            )
+            coloraxis = dict(
+                colorscale=discrete_scale,
+                cmin=-0.5,
+                cmax=len(categories) - 0.5,
+            )
         # --------------------------------------------------------
         # 6️⃣ Create T-S Scatter Plot
         # --------------------------------------------------------
@@ -1136,21 +1194,13 @@ def register_callbacks(app: dash.Dash) -> None:
                 mode="markers",
                 marker=dict(
                     size=size,
-                    color=df[color_var],
-                    colorscale=color_map,
-                    cmin=vmin,
-                    cmax=vmax,
+                    color=marker_color,
                     coloraxis="coloraxis"
                 ),
-                # Only send point_id
-                customdata=df["point_id"].astype(np.int32).to_numpy(),
+                customdata=customdata,
                 selected=dict(marker=dict(opacity=1)),
                 unselected=dict(marker=dict(opacity=hidden_opacity)),
-                hovertemplate=(
-                    "Salinity: %{x:.2f}<br>"
-                    "Temperature: %{y:.2f} °C<br>"
-                    f"{color_var}: %{{marker.color:.2f}}<extra></extra>"
-                ),
+                hovertemplate=hovertemplate,
             )
         )
         # --------------------------------------------------------
@@ -1213,12 +1263,10 @@ def register_callbacks(app: dash.Dash) -> None:
                 ticks='outside'
             ),
             coloraxis=dict(
-                colorscale=color_map,
-                cmin=vmin,
-                cmax=vmax,
+                **coloraxis,
                 colorbar=dict(
                     title=dict(
-                        text=f'{color_var.replace("_"," ").capitalize()} ({get_unit(color_var)})',
+                        text=colorbar_title,
                         side='bottom',
                         font=dict(size=base_font + 1),
                     ),
@@ -1239,6 +1287,14 @@ def register_callbacks(app: dash.Dash) -> None:
                 )
             )
         )
+        if not numeric_color_mode:
+            fig.update_coloraxes(
+                colorbar=dict(
+                    tickmode="array",
+                    tickvals=list(range(len(categories))),
+                    ticktext=categories,
+                )
+            )
         return fig
 
     # ============================================================
@@ -1291,18 +1347,20 @@ def register_callbacks(app: dash.Dash) -> None:
                 font=dict(size=16, color="red"),
             )
             return fig
-        if (
+        has_cruise_selection = (
             cruise_track_selection
             and cruise_track_selection.get("mode") != "all"
             and cruise_track_selection.get("selected_ids") is not None
-        ):
+        )
+        if has_cruise_selection:
             ids = np.asarray(cruise_track_selection["selected_ids"], dtype=np.int32)
             mask = np.isin(df["point_id"].to_numpy(), ids)
             df = df.loc[mask]
         selected_ids = None
         if isinstance(selected_data, dict):
             selected_ids = selected_data.get("selected_ids")
-        if selected_ids:
+        has_point_selection = bool(selected_ids)
+        if has_point_selection:
             ids = np.asarray(selected_ids, dtype=np.int32)
             if "cast" in df.columns:
                 mask = np.isin(df["point_id"].to_numpy(), ids)
@@ -1313,6 +1371,17 @@ def register_callbacks(app: dash.Dash) -> None:
             else:
                 mask = np.isin(df["point_id"].to_numpy(), ids)
                 df = df.loc[mask]
+        elif not has_cruise_selection:
+            fig.add_annotation(
+                text="Select points in the main or T-S plot to show profiles",
+                x=0.5,
+                y=0.5,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=16, color="black"),
+            )
+            return fig
         required_cols = ["depth", color_var, "latitude", "longitude"]
         for col in required_cols:
             if col not in df.columns:
