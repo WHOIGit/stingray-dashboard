@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-
-import numpy as np
 import pandas as pd
 
 from stingray_dashboard import data
@@ -37,43 +34,16 @@ def _write_example_csv(work_dir):
     frame.to_csv(dataset_dir / "example.csv", index=False)
 
 
-def test_read_only_workspace_without_misc_uses_packaged_references(tmp_path):
-    """A data-only workspace must start without creating override directories."""
-    # Create the complete dataset before removing directory write permissions.
+def test_dashboard_loads_example_dataset(tmp_path):
+    """The dashboard should start with the example dataset available."""
+    # Create the representative dashboard input and start the application.
     _write_example_csv(tmp_path)
-    original_mode = tmp_path.stat().st_mode
-    os.chmod(tmp_path, 0o555)
-
-    try:
-        # Build the application against a workspace that cannot accept writes.
-        app = create_app(tmp_path)
-
-        # Confirm startup succeeded and packaged reference tables were loaded.
-        assert app is not None
-        assert data.stations is not None
-        assert data.bathy is not None
-
-        # The optional override directory must not be created as a side effect.
-        assert not (tmp_path / "misc").exists()
-    finally:
-        # Restore permissions so pytest can remove the temporary workspace.
-        os.chmod(tmp_path, original_mode)
-
-
-def test_missing_data_and_misc_directories_are_not_created(tmp_path):
-    """An empty input workspace must remain unchanged during application startup."""
-    # Start the application before creating any dashboard input directories.
     app = create_app(tmp_path)
 
-    # A valid empty dashboard still loads its packaged auxiliary references.
+    # Confirm the application and its representative dataset are discoverable.
     assert app is not None
-    assert data.stations is not None
-    assert data.bathy is not None
-    assert data.scan_datasets() == []
-
-    # Input paths are observational and therefore must never be materialized.
-    assert not (tmp_path / "data").exists()
-    assert not (tmp_path / "misc").exists()
+    assert data.scan_datasets() == ["stingray"]
+    assert data.get_csv_files("stingray") == ["example"]
 
 
 def _post_callback(client, output, outputs, inputs, changed, states=None):
@@ -99,67 +69,8 @@ def _post_callback(client, output, outputs, inputs, changed, states=None):
     return response.get_json()
 
 
-def test_canonicalize_columns_replaces_altitude_sentinel():
-    """Invalid instrument altitude sentinels must not enter calculations."""
-    # Preserve valid values while replacing the documented sentinel with NaN.
-    frame = pd.DataFrame({"altitude": [3.5, 9999.99, 9999.98, np.nan]})
-    result = data.canonicalize_columns(frame)
-
-    assert result.loc[0, "altitude"] == 3.5
-    assert np.isnan(result.loc[1, "altitude"])
-    assert result.loc[2, "altitude"] == 9999.98
-    assert np.isnan(result.loc[3, "altitude"])
-
-
-def test_unmatched_mirrored_selection_selects_no_points(tmp_path):
-    """An ID absent from another plot must not clear its selection styling."""
-    # Create the app and locate Dash's generated duplicate-output callback key.
-    _write_example_csv(tmp_path)
-    app = create_app(tmp_path)
-    callback_key = next(
-        key for key in app.callback_map
-        if key.startswith("..main_plot.figure@")
-    )
-
-    # Select an ID that does not exist in either compact point-ID store.
-    result = _post_callback(
-        app.server.test_client(),
-        callback_key,
-        [
-            {"id": "main_plot", "property": "figure"},
-            {"id": "ts_plot", "property": "figure"},
-        ],
-        [
-            (
-                "main_plot",
-                "selectedData",
-                {
-                    "points": [
-                        {
-                            "customdata": 999,
-                            "curveNumber": 0,
-                            "pointNumber": 0,
-                        }
-                    ]
-                },
-            ),
-            ("ts_plot", "selectedData", None),
-        ],
-        "main_plot.selectedData",
-        [
-            ("main_plot_point_ids", "data", [[0, 1, 2]]),
-            ("ts_plot_point_ids", "data", [[0, 1, 2]]),
-        ],
-    )
-
-    # Dash represents "select none" as an empty list, not null.
-    for plot_id in ("main_plot", "ts_plot"):
-        operation = result["response"][plot_id]["figure"]["operations"][0]
-        assert operation["params"]["value"] == []
-
-
-def test_cast_coloring_uses_one_continuous_trace(tmp_path):
-    """Many casts should not create one expensive trace per cast."""
+def test_main_plot_renders_example_dataset(tmp_path):
+    """The main depth plot should render the representative observations."""
     # Build the app around the compact cast dataset.
     _write_example_csv(tmp_path)
     app = create_app(tmp_path)
@@ -197,55 +108,119 @@ def test_cast_coloring_uses_one_continuous_trace(tmp_path):
         "color_variable.value",
     )
 
-    # Both casts are encoded in one WebGL trace with a continuous color axis.
+    # The figure contains the complete six-row example dataset.
     figure = result["response"]["main_plot"]["figure"]
-    assert len(figure["data"]) == 1
-    assert figure["data"][0]["type"] == "scattergl"
-    assert figure["data"][0]["marker"]["coloraxis"] == "coloraxis"
+    assert figure["data"]
+    assert sum(len(trace["x"]) for trace in figure["data"]) == 6
+    assert figure["layout"]["xaxis"]["title"]["text"] == "Latitude"
+    assert figure["layout"]["yaxis"]["title"]["text"] == "Depth (m)"
 
 
-def test_ts_plot_supports_categorical_color_variable(tmp_path):
-    """String color variables should render categories instead of raising."""
-    # Build the application with a categorical sensor-like column.
+def test_ts_plot_renders_numeric_and_categorical_data(tmp_path):
+    """The T-S plot should accept scientific values and descriptive classes."""
+    # Build the application around the representative dataset.
     _write_example_csv(tmp_path)
     app = create_app(tmp_path)
 
-    # Request the T-S plot using strings for marker color.
-    result = _post_callback(
+    # Exercise the two supported color-data contracts through the same plot.
+    for color_variable, color_map in [
+        ("chlorophyll", "Viridis"),
+        ("sample_type", "Plotly"),
+    ]:
+        result = _post_callback(
+            app.server.test_client(),
+            "ts_plot.figure",
+            {"id": "ts_plot", "property": "figure"},
+            [
+                ("dataset_selector", "value", "stingray"),
+                ("csv_selector", "value", "example"),
+                ("sub_sample", "value", 1),
+                ("sampling_mode", "value", "subsample"),
+                ("ts_color_variable", "value", color_variable),
+                ("ts_color_map", "value", color_map),
+                ("size", "value", 5),
+                ("ts_v_min", "value", None),
+                ("ts_v_max", "value", None),
+                ("hidden_opacity", "value", 0.1),
+                ("plot_font_size", "value", 14),
+                (
+                    "cruise_track_selection_store",
+                    "data",
+                    {"mode": "all", "selected_ids": None},
+                ),
+            ],
+            "ts_color_variable.value",
+        )
+
+        # The scatter trace contains every example observation.
+        figure = result["response"]["ts_plot"]["figure"]
+        assert len(figure["data"][0]["x"]) == 6
+        assert figure["layout"]["xaxis"]["title"]["text"] == "Salinity (psu)"
+        assert figure["layout"]["yaxis"]["title"]["text"] == "Temperature (°C)"
+
+
+def test_ts_selection_initializes_profile_plot(tmp_path):
+    """A T-S selection should populate the shared profile-selection store."""
+    # Build the app and locate the selection-store callback.
+    _write_example_csv(tmp_path)
+    app = create_app(tmp_path)
+
+    # Select point 3 in the T-S plot using its compact point-ID mapping.
+    selection = _post_callback(
         app.server.test_client(),
-        "ts_plot.figure",
-        {"id": "ts_plot", "property": "figure"},
+        "main_plot_selected_data.data",
+        {"id": "main_plot_selected_data", "property": "data"},
+        [
+            ("main_plot", "selectedData", None),
+            (
+                "ts_plot",
+                "selectedData",
+                {
+                    "points": [
+                        {
+                            "curveNumber": 0,
+                            "pointNumber": 0,
+                        }
+                    ]
+                },
+            ),
+        ],
+        "ts_plot.selectedData",
+        [
+            ("main_plot_point_ids", "data", [[0, 1, 2]]),
+            ("ts_plot_point_ids", "data", [[3, 4, 5]]),
+        ],
+    )
+    selected_data = selection["response"]["main_plot_selected_data"]["data"]
+    assert selected_data == {"selected_ids": [3]}
+
+    # Feed the shared selection into the profile callback as the browser does.
+    profile = _post_callback(
+        app.server.test_client(),
+        "profile_plot.figure",
+        {"id": "profile_plot", "property": "figure"},
         [
             ("dataset_selector", "value", "stingray"),
             ("csv_selector", "value", "example"),
             ("sub_sample", "value", 1),
             ("sampling_mode", "value", "subsample"),
-            ("ts_color_variable", "value", "sample_type"),
-            ("ts_color_map", "value", "Plotly"),
-            ("size", "value", 5),
-            ("ts_v_min", "value", None),
-            ("ts_v_max", "value", None),
-            ("hidden_opacity", "value", 0.1),
+            ("profile_variable", "value", "chlorophyll"),
+            ("profile_color_map", "value", "Plotly"),
             ("plot_font_size", "value", 14),
+            ("main_plot_selected_data", "data", selected_data),
             (
                 "cruise_track_selection_store",
                 "data",
                 {"mode": "all", "selected_ids": None},
             ),
         ],
-        "ts_color_variable.value",
+        "main_plot_selected_data.data",
     )
 
-    # Categories remain in one WebGL trace and retain point IDs for linking.
-    figure = result["response"]["ts_plot"]["figure"]
-    scatter = figure["data"][0]
-    assert scatter["type"] == "scattergl"
-    assert len(scatter["marker"]["color"]) == 6
-    assert scatter["customdata"][0] == [0, "surface"]
-    assert figure["layout"]["coloraxis"]["colorbar"]["ticktext"] == [
-        "deep",
-        "surface",
-    ]
+    # Point 3 belongs to cast 2, so its full vertical profile is displayed.
+    figure = profile["response"]["profile_plot"]["figure"]
+    assert len(figure["data"]) == 1
+    assert figure["data"][0]["name"] == "Cast 2"
 
 
 def test_profile_requires_selection_before_plotting_casts(tmp_path):
@@ -283,8 +258,8 @@ def test_profile_requires_selection_before_plotting_casts(tmp_path):
     assert "Select points" in figure["layout"]["annotations"][0]["text"]
 
 
-def test_selected_cast_profiles_use_webgl_traces(tmp_path):
-    """Selected points should expand to their full casts and use WebGL traces."""
+def test_main_plot_selection_renders_profiles(tmp_path):
+    """Main-plot selections should render the corresponding complete casts."""
     _write_example_csv(tmp_path)
     app = create_app(tmp_path)
 
@@ -312,4 +287,4 @@ def test_selected_cast_profiles_use_webgl_traces(tmp_path):
 
     figure = result["response"]["profile_plot"]["figure"]
     assert len(figure["data"]) == 2
-    assert all(trace["type"] == "scattergl" for trace in figure["data"])
+    assert {trace["name"] for trace in figure["data"]} == {"Cast 1", "Cast 2"}

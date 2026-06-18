@@ -544,21 +544,34 @@ def register_callbacks(app: dash.Dash) -> None:
                 )
         return patched_scatter, patched_ts
 
-    # --- Callback: Store selected IDs from main plot (for cross-plot filtering) ---
+    # --- Callback: Store selected IDs from either scatter plot for profiles ---
     @app.callback(
         Output('main_plot_selected_data', 'data'),
         Input('main_plot', 'selectedData'),
+        Input('ts_plot', 'selectedData'),
         State('main_plot_point_ids', 'data'),
+        State('ts_plot_point_ids', 'data'),
         prevent_initial_call=True
     )
-    def store_scatter_selection_indices(selectedData, main_point_ids):
-        """Store IDs of selected points in main scatter plot."""
-        if not selectedData or "points" not in selectedData:
+    def store_scatter_selection_indices(
+        main_selected_data,
+        ts_selected_data,
+        main_point_ids,
+        ts_point_ids,
+    ):
+        """Store IDs selected in the main or T-S scatter plot."""
+        if ctx.triggered_id == "ts_plot":
+            selected_data = ts_selected_data
+            point_ids = ts_point_ids
+        else:
+            selected_data = main_selected_data
+            point_ids = main_point_ids
+        if not selected_data or "points" not in selected_data:
             return None
         selected_ids = [
             point_id
-            for p in selectedData["points"]
-            for point_id in [get_point_id_from_event_point(p, main_point_ids)]
+            for p in selected_data["points"]
+            for point_id in [get_point_id_from_event_point(p, point_ids)]
             if point_id is not None
         ]
         return {"selected_ids": selected_ids}

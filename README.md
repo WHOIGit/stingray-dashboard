@@ -3,62 +3,53 @@
 Installable Dash application for interactive exploration of NES-LTER Stingray /
 ISIIS dashboard data.
 
-## Run from the GitHub source image
+## Run the released image with Compose
 
-This is the recommended first-run path. Docker downloads the repository, builds
-`Dockerfile.release`, and runs the dashboard without a local clone or Python
-installation.
+This is the recommended deployment path. Docker pulls the released dashboard
+image from GitHub Container Registry, so neither a source checkout nor a local
+image build is required. The container reads dashboard-ready files from the
+host workspace and never modifies them.
 
-Run these commands from the workspace that contains `dash_data/`:
+Unix shell:
 
 ```bash
-# First install/run: remove any previous dashboard container so the name is free.
-docker rm -f stingray-dashboard 2>/dev/null || true
+# Download the Compose definition that runs the published GHCR image.
+curl -O https://raw.githubusercontent.com/anhph95/stingraytools/main/compose.ghcr.yml
 
-# First install/run: build the dashboard image directly from the GitHub main branch.
-docker build \
-  -f Dockerfile.release \
-  -t stingray-dashboard:git \
-  "https://github.com/anhph95/stingraytools.git#main"
+# Pull the selected release before starting the service.
+DASH_DATA_DIR=/absolute/path/to/dash_data \
+  docker compose -f compose.ghcr.yml pull
 
-# First install/run: start the dashboard with local data mounted read-only at /dash_data.
-docker run -d \
-  --name stingray-dashboard \
-  --restart unless-stopped \
-  -p 8050:8050 \
-  -v "$(pwd)/dash_data:/dash_data:ro" \
-  stingray-dashboard:git
-
-# Later update/rebuild: stop and remove the old container while preserving host data.
-docker rm -f stingray-dashboard 2>/dev/null || true
-
-# Later update/rebuild: fetch the newest base layers and rebuild from GitHub source.
-docker build --pull --no-cache \
-  -f Dockerfile.release \
-  -t stingray-dashboard:git \
-  "https://github.com/anhph95/stingraytools.git#main"
-
-# Later update/rebuild: restart the dashboard from the rebuilt image.
-docker run -d \
-  --name stingray-dashboard \
-  --restart unless-stopped \
-  -p 8050:8050 \
-  -v "$(pwd)/dash_data:/dash_data:ro" \
-  stingray-dashboard:git
+# Start the released image with dashboard data mounted read-only.
+DASH_DATA_DIR=/absolute/path/to/dash_data \
+STINGRAY_DEFAULT_DATASET=stingray \
+  docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
-Open the dashboard at:
+Windows PowerShell:
 
-```text
-http://127.0.0.1:8050
+```powershell
+# Download the Compose definition that runs the published GHCR image.
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/anhph95/stingraytools/main/compose.ghcr.yml" `
+  -OutFile "compose.ghcr.yml"
+
+# Select the host workspace and initial dataset.
+$env:DASH_DATA_DIR = "C:\path\to\dash_data"
+$env:STINGRAY_DEFAULT_DATASET = "stingray"
+
+# Pull and start the released image.
+docker compose -f compose.ghcr.yml pull
+docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
-The container prints this address when it starts. If the host port or public URL
-is different, set `STINGRAY_DASHBOARD_PORT` or `STINGRAY_DASHBOARD_PUBLIC_URL`
-so the startup message matches the address users should open.
+Open `http://127.0.0.1:8050`. Leave `STINGRAY_DEFAULT_DATASET` unset to open
+the first dataset folder under `dash_data/data/`. Set
+`STINGRAY_DASHBOARD_PORT=8051` when host port `8050` is unavailable.
 
-Replace `main` with a branch, tag, or full commit hash to select another source
-revision.
+The default image is `ghcr.io/anhph95/stingray-dashboard:latest`. For a
+reproducible server deployment, set `STINGRAY_DASHBOARD_IMAGE` to a released
+version tag such as `ghcr.io/anhph95/stingray-dashboard:2.1.0`.
 
 ## Data layout
 
@@ -158,13 +149,13 @@ The packaged station and bathymetry tables are used automatically. Add
 `dash_data/misc/` only when supplying workspace-specific replacements. Changing
 dataset files does not require rebuilding the image.
 
-## Run the published container image
+## Run the released image directly
 
 GitHub Actions builds `ghcr.io/anhph95/stingray-dashboard` from repository
 source after every push to `main`. A Git tag such as `v2.1.0` also publishes
 versioned `2.1.0` and `2.1` image tags.
 
-Run the rolling image from the workspace that contains `dash_data/`:
+Use this direct `docker run` workflow when Compose is not available:
 
 ```bash
 # Download the newest image published from the main branch.
@@ -201,40 +192,10 @@ For reproducible production deployment, replace `latest` with a version such as
 docker rm -f stingray-dashboard
 ```
 
-## Run with Compose
+## Compose operations
 
-Docker Compose is the most portable dashboard install path across Linux, macOS,
-and Windows with Docker Desktop. The container reads `dash_data/` products that
-already exist; raw sensor processing still uses the Python `stingray` command.
-
-Download the release Compose file from the repository and start the published
-image with the selected dashboard workspace.
-
-Unix shell:
-
-```bash
-curl -O https://raw.githubusercontent.com/anhph95/stingraytools/main/compose.ghcr.yml
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-STINGRAY_DEFAULT_DATASET=stingray \
-  docker compose -f compose.ghcr.yml up -d
-```
-
-Windows PowerShell:
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/anhph95/stingraytools/main/compose.ghcr.yml" `
-  -OutFile "compose.ghcr.yml"
-$env:DASH_DATA_DIR = "C:\path\to\dash_data"
-$env:STINGRAY_DEFAULT_DATASET = "stingray"
-docker compose -f compose.ghcr.yml up -d
-```
-
-Leave `STINGRAY_DEFAULT_DATASET` unset to open the first available dataset
-folder under `dash_data/data/`. If host port `8050` is already in use, change
-only the host-side mapping by setting `STINGRAY_DASHBOARD_PORT`, for example
-`STINGRAY_DASHBOARD_PORT=8051 docker compose -f compose.ghcr.yml up -d`, then
-open `http://127.0.0.1:8051`.
+The first section contains the complete recommended Compose installation.
+These commands cover routine release updates and deployment customization.
 
 Update the application while preserving the mounted datasets:
 
@@ -245,7 +206,7 @@ DASH_DATA_DIR=/absolute/path/to/dash_data \
 
 # Recreate the service only when the downloaded image has changed.
 DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml up -d
+  docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
 Pin an application release and optionally change the host port:
@@ -255,7 +216,7 @@ Pin an application release and optionally change the host port:
 STINGRAY_DASHBOARD_IMAGE=ghcr.io/anhph95/stingray-dashboard:2.1.0 \
 STINGRAY_DASHBOARD_PORT=8051 \
 DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml up -d
+  docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
 Pin the initial dataset on a remote server when the mounted workspace contains
@@ -265,7 +226,7 @@ multiple dataset folders:
 # Open dash_data/data/stingray by default while preserving the same read-only mount.
 DASH_DATA_DIR=/mnt/stingray_share/dash_data \
 STINGRAY_DEFAULT_DATASET=stingray \
-  docker compose -f compose.ghcr.yml up -d
+  docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
 Leave `STINGRAY_DEFAULT_DATASET` unset to open the first available dataset
@@ -281,8 +242,10 @@ DASH_DATA_DIR=/absolute/path/to/dash_data \
 
 ## Build from a local checkout
 
-Developers can build the exact checked-out source, including uncommitted local
-changes. Run these commands from the repository root:
+This section is for dashboard development only. Normal users and deployments
+should run a released GHCR image as described above. Developers can build the
+exact checked-out source, including uncommitted local changes, from the
+repository root:
 
 ```bash
 # Clone and enter the source repository.
