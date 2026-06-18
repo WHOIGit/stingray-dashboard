@@ -62,6 +62,20 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+
+    # Instrument exports use 9999.99 as an invalid altitude sentinel. Replace
+    # it before plotting or aggregation so it cannot distort scientific ranges.
+    if "altitude" in df.columns:
+        altitude = pd.to_numeric(df["altitude"], errors="coerce")
+        invalid_altitude = np.isclose(
+            altitude,
+            9999.99,
+            rtol=0.0,
+            atol=1e-6,
+            equal_nan=False,
+        )
+        df.loc[invalid_altitude, "altitude"] = np.nan
+
     def norm_colname(c: str) -> str:
         c = str(c).strip().lower()
         c = re.sub(r"_[0-9]+$", "", c)  # T090_1 -> t090, Sal00_2 -> sal00

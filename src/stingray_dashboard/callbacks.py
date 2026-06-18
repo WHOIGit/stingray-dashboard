@@ -20,7 +20,6 @@ from .config import (
 from .plot_utils import (
     dynamic_ticks,
     get_palette,
-    get_point_id_from_customdata,
     get_point_id_from_event_point,
     get_row_by_point_id,
     get_visible_range,
@@ -60,6 +59,48 @@ def _deserialize_url_value(raw, typ, default=None):
     return default
 
 def register_callbacks(app: dash.Dash) -> None:
+    # Extract only trace-wise point IDs in the browser. Selection callbacks
+    # use these compact arrays instead of transferring complete Plotly figures.
+    app.clientside_callback(
+        """
+        function(figure) {
+            if (!figure || !figure.data) {
+                return [];
+            }
+            return figure.data.map(function(trace) {
+                if (!trace.customdata) {
+                    return [];
+                }
+                return trace.customdata.map(function(value) {
+                    return Array.isArray(value) ? value[0] : value;
+                });
+            });
+        }
+        """,
+        Output("main_plot_point_ids", "data"),
+        Input("main_plot", "figure"),
+    )
+
+    app.clientside_callback(
+        """
+        function(figure) {
+            if (!figure || !figure.data) {
+                return [];
+            }
+            return figure.data.map(function(trace) {
+                if (!trace.customdata) {
+                    return [];
+                }
+                return trace.customdata.map(function(value) {
+                    return Array.isArray(value) ? value[0] : value;
+                });
+            });
+        }
+        """,
+        Output("ts_plot_point_ids", "data"),
+        Input("ts_plot", "figure"),
+    )
+
     # --- Callback: Update URL query string based on current UI state ---
     @app.callback(
         Output("url", "search"),
@@ -456,25 +497,25 @@ def register_callbacks(app: dash.Dash) -> None:
         Output("ts_plot", "figure", allow_duplicate=True),
         Input("main_plot", "selectedData"),
         Input("ts_plot", "selectedData"),
-        State("main_plot", "figure"),
-        State("ts_plot", "figure"),
+        State("main_plot_point_ids", "data"),
+        State("ts_plot_point_ids", "data"),
         prevent_initial_call=True
     )
-    def mirror_selection(scatter_sel, ts_sel, fig_scatter, fig_ts):
+    def mirror_selection(scatter_sel, ts_sel, scatter_point_ids, ts_point_ids):
         trigger = ctx.triggered_id
         patched_scatter = Patch()
         patched_ts = Patch()
         # --- Detect clearing ---
         if trigger == "main_plot" and not scatter_sel:
-            for i, _ in enumerate(fig_ts.get("data", [])):
+            for i, _ in enumerate(ts_point_ids or []):
                 patched_ts["data"][i]["selectedpoints"] = None
-            for i, _ in enumerate(fig_scatter.get("data", [])):
+            for i, _ in enumerate(scatter_point_ids or []):
                 patched_scatter["data"][i]["selectedpoints"] = None
             return patched_scatter, patched_ts
         if trigger == "ts_plot" and not ts_sel:
-            for i, _ in enumerate(fig_scatter.get("data", [])):
+            for i, _ in enumerate(scatter_point_ids or []):
                 patched_scatter["data"][i]["selectedpoints"] = None
-            for i, _ in enumerate(fig_ts.get("data", [])):
+            for i, _ in enumerate(ts_point_ids or []):
                 patched_ts["data"][i]["selectedpoints"] = None
             return patched_scatter, patched_ts
         # --- Collect selected IDs ---
@@ -483,32 +524,29 @@ def register_callbacks(app: dash.Dash) -> None:
             selected_ids = {
                 point_id
                 for p in scatter_sel["points"]
-                for point_id in [get_point_id_from_event_point(p, fig_scatter)]
+                for point_id in [get_point_id_from_event_point(p, scatter_point_ids)]
                 if point_id is not None
             }
         elif trigger == "ts_plot" and ts_sel and ts_sel.get("points"):
             selected_ids = {
                 point_id
                 for p in ts_sel["points"]
-                for point_id in [get_point_id_from_event_point(p, fig_ts)]
+                for point_id in [get_point_id_from_event_point(p, ts_point_ids)]
                 if point_id is not None
             }
         # --- Apply selection to both figures ---
         ids = np.asarray(list(selected_ids), dtype=np.int32)
-        for fig, patch in [(fig_scatter, patched_scatter), (fig_ts, patched_ts)]:
-            for i, trace in enumerate(fig.get("data", [])):
-                if "customdata" not in trace:
+        for trace_point_ids, patch in [
+            (scatter_point_ids, patched_scatter),
+            (ts_point_ids, patched_ts),
+        ]:
+            for i, custom_ids in enumerate(trace_point_ids or []):
+                if not custom_ids:
                     continue
-                custom_ids = [
-                    point_id
-                    for customdata in trace["customdata"]
-                    for point_id in [get_point_id_from_customdata(customdata)]
-                    if point_id is not None
-                ]
                 mask = np.isin(custom_ids, ids)
                 selected_idx = np.nonzero(mask)[0]
                 patch["data"][i]["selectedpoints"] = (
-                    selected_idx.tolist() if len(selected_idx) else None
+                    selected_idx.tolist() if len(selected_idx) else []
                 )
         return patched_scatter, patched_ts
 
@@ -516,17 +554,17 @@ def register_callbacks(app: dash.Dash) -> None:
     @app.callback(
         Output('main_plot_selected_data', 'data'),
         Input('main_plot', 'selectedData'),
-        State('main_plot', 'figure'),
+        State('main_plot_point_ids', 'data'),
         prevent_initial_call=True
     )
-    def store_scatter_selection_indices(selectedData, main_figure):
+    def store_scatter_selection_indices(selectedData, main_point_ids):
         """Store IDs of selected points in main scatter plot."""
         if not selectedData or "points" not in selectedData:
             return None
         selected_ids = [
             point_id
             for p in selectedData["points"]
-            for point_id in [get_point_id_from_event_point(p, main_figure)]
+            for point_id in [get_point_id_from_event_point(p, main_point_ids)]
             if point_id is not None
         ]
         return {"selected_ids": selected_ids}
@@ -644,6 +682,14 @@ def register_callbacks(app: dash.Dash) -> None:
             if is_discrete_variable(df[color_var])
             else "continuous"
         )
+        # Cast numbers identify an ordered sequence of profiles. Render them
+        # on one continuous trace to avoid creating one trace per cast.
+        if color_var == "cast":
+            color_mode = "continuous"
+
+        # Continuous marker coloring requires a sequential Plotly colorscale.
+        if color_mode == "continuous" and palette_type == "discrete":
+            palette = px.colors.sequential.Viridis
         # For numeric color variables, default to robust 5th–95th percentile limits.
         if pd.api.types.is_numeric_dtype(df[color_var]):
             if vmin is None or vmax is None:
@@ -1333,7 +1379,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 g = g.sort_values("depth")
                 color = cast_colors.get(cast_id, "rgba(0,0,0,0.6)")
                 fig.add_trace(
-                    go.Scatter(
+                    go.Scattergl(
                         x=g[color_var],
                         y=g["depth"],
                         mode="lines+markers",
@@ -1442,13 +1488,13 @@ def register_callbacks(app: dash.Dash) -> None:
     @app.callback(
         Output('click-output', 'children'),
         Input('main_plot', 'clickData'),
-        State('main_plot', 'figure'),
+        State('main_plot_point_ids', 'data'),
         State('dataset_selector', 'value'),
         State('csv_selector', 'value'),
         State('sub_sample', 'value'),
         State('sampling_mode', 'value'),
     )
-    def display_click_data(clickData, main_figure, dataset, csv_file, sub_sample, sampling_mode):
+    def display_click_data(clickData, main_point_ids, dataset, csv_file, sub_sample, sampling_mode):
         """
         Display detailed information for a clicked point in the main scatter plot.
         Fetches the full row server-side using point_id.
@@ -1457,7 +1503,7 @@ def register_callbacks(app: dash.Dash) -> None:
             return "Click on a point to see full details."
         try:
             clicked_point = clickData["points"][0]
-            point_id = get_point_id_from_event_point(clicked_point, main_figure)
+            point_id = get_point_id_from_event_point(clicked_point, main_point_ids)
 
             if point_id is None:
                 return "Click on a data point to see full details."

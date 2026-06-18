@@ -93,17 +93,17 @@ def get_point_id_from_customdata(customdata):
     return int(arr.flat[0])
 
 
-def get_customdata_from_figure_point(point, figure):
+def get_customdata_from_trace_ids(point, trace_point_ids):
     """
-    Recover customdata from the rendered figure when Dash/Plotly omits it
-    from clickData or selectedData.
+    Recover point_id from compact trace-wise arrays when Dash/Plotly omits
+    customdata from clickData or selectedData.
 
     Event geometry:
       curveNumber = trace index k
       pointNumber/pointIndex = point index j within trace k
-      customdata[k][j] -> point_id i
+      trace_point_ids[k][j] -> point_id i
     """
-    if not figure:
+    if not trace_point_ids:
         return None
 
     curve_number = point.get("curveNumber")
@@ -112,28 +112,21 @@ def get_customdata_from_figure_point(point, figure):
     if curve_number is None or point_number is None:
         return None
 
-    traces = figure.get("data", [])
-
-    if curve_number >= len(traces):
-        return None
-
-    customdata = traces[curve_number].get("customdata")
-
-    if customdata is None:
+    if curve_number >= len(trace_point_ids):
         return None
 
     try:
-        return customdata[point_number]
+        return trace_point_ids[curve_number][point_number]
     except (IndexError, TypeError):
         return None
 
 
-def get_point_id_from_event_point(point, figure=None):
+def get_point_id_from_event_point(point, trace_point_ids=None):
     """
     Extract point_id from a Dash/Plotly event point.
 
-    Prefer the event payload. Fall back to the full figure because newer
-    Plotly/Dash versions may omit customdata from event data.
+    Prefer the event payload. Fall back to compact trace-wise point-ID arrays
+    because newer Plotly/Dash versions may omit customdata from event data.
     """
     point_id = get_point_id_from_customdata(point.get("customdata"))
 
@@ -141,7 +134,7 @@ def get_point_id_from_event_point(point, figure=None):
         return point_id
 
     return get_point_id_from_customdata(
-        get_customdata_from_figure_point(point, figure)
+        get_customdata_from_trace_ids(point, trace_point_ids)
     )
 
 

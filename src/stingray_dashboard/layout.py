@@ -359,6 +359,10 @@ def make_layout() -> html.Div:
                 dcc.Store(id='cruise_track_selected_data'),
                 dcc.Store(id='cruise_track_selection_store', data={"selected_ids": None}),
                 dcc.Store(id='main_plot_selected_data'),
+                # Compact trace-wise point-ID arrays support cross-plot
+                # selection without sending complete Plotly figures to Python.
+                dcc.Store(id='main_plot_point_ids', data=[]),
+                dcc.Store(id='ts_plot_point_ids', data=[]),
             ], className='plot-workspace'),
         ], className='dashboard-body'),
         # ===== FOOTER =====
