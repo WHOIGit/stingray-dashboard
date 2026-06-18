@@ -7,6 +7,7 @@ import dash
 
 from .callbacks import register_callbacks
 from .data import init_data_paths, load_auxiliary_data
+from .config import set_default_dataset
 from .layout import make_layout
 
 
@@ -19,6 +20,7 @@ def cli(argv: list[str] | None = None):
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8050)
     parser.add_argument("--work-dir", type=str, default=None)
+    parser.add_argument("--default-dataset", type=str, default=None)
 
     return parser.parse_args(argv)
 
@@ -45,10 +47,15 @@ def resolve_assets_dir() -> Path:
     return Path.cwd() / "assets"
 
 
-def create_app(work_dir: str | Path | None = None) -> dash.Dash:
+def create_app(
+    work_dir: str | Path | None = None,
+    default_dataset: str | None = None,
+) -> dash.Dash:
     """
     Build and configure the Dash application.
     """
+    if default_dataset is not None:
+        set_default_dataset(default_dataset)
     init_data_paths(work_dir)
     load_auxiliary_data()
 
@@ -66,7 +73,10 @@ def create_app(work_dir: str | Path | None = None) -> dash.Dash:
 
 def main(argv: list[str] | None = None) -> None:
     args = cli(argv)
-    app = create_app(work_dir=args.work_dir)
+    app = create_app(
+        work_dir=args.work_dir,
+        default_dataset=args.default_dataset,
+    )
     app.run(host=args.host, port=args.port, threaded=True, debug=False)
 
 

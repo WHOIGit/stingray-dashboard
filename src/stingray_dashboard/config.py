@@ -13,11 +13,22 @@ meta_vars = [
     "media_2", "media_path_2", "frame_2", "id_2", "link_2"
 ]
 
-DEFAULT_DATASET = "stingray_NESLTER"
+DEFAULT_DATASET = os.getenv("STINGRAY_DEFAULT_DATASET", "")
+
+
+def set_default_dataset(dataset: str | None) -> None:
+    global DEFAULT_DATASET
+    DEFAULT_DATASET = dataset or ""
+    for param in URL_SYNCED_PARAMS:
+        if param["key"] == "dataset":
+            param["default"] = DEFAULT_DATASET
+            break
+
+
 def choose_default_dataset(datasets):
     if not datasets:
         return None
-    return DEFAULT_DATASET if DEFAULT_DATASET in datasets else datasets[-1]
+    return DEFAULT_DATASET if DEFAULT_DATASET in datasets else datasets[0]
     
 # ============================================
 # Units

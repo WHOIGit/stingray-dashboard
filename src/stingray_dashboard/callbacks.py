@@ -11,7 +11,6 @@ from dash import Input, Output, Patch, State, ctx, dcc, html, no_update
 
 from . import data
 from .config import (
-    DEFAULT_DATASET,
     URL_SYNCED_PARAMS,
     choose_default_dataset,
     get_unit,
@@ -207,12 +206,7 @@ def register_callbacks(app: dash.Dash) -> None:
         if current_value in ds:
             return options, current_value
         if current_value is None:
-            default_ds = (
-                DEFAULT_DATASET
-                if DEFAULT_DATASET in ds
-                else ds[-1]
-            )
-            return options, default_ds
+            return options, choose_default_dataset(ds)
         return options, no_update
 
     # --- Callback: Refresh available CSV file list ---
