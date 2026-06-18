@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -32,6 +34,45 @@ def _write_example_csv(work_dir):
     dataset_dir = work_dir / "data" / "stingray"
     dataset_dir.mkdir(parents=True)
     frame.to_csv(dataset_dir / "example.csv", index=False)
+
+
+def test_read_only_workspace_without_misc_uses_packaged_references(tmp_path):
+    """A data-only workspace must start without creating override directories."""
+    # Create the complete dataset before removing directory write permissions.
+    _write_example_csv(tmp_path)
+    original_mode = tmp_path.stat().st_mode
+    os.chmod(tmp_path, 0o555)
+
+    try:
+        # Build the application against a workspace that cannot accept writes.
+        app = create_app(tmp_path)
+
+        # Confirm startup succeeded and packaged reference tables were loaded.
+        assert app is not None
+        assert data.stations is not None
+        assert data.bathy is not None
+
+        # The optional override directory must not be created as a side effect.
+        assert not (tmp_path / "misc").exists()
+    finally:
+        # Restore permissions so pytest can remove the temporary workspace.
+        os.chmod(tmp_path, original_mode)
+
+
+def test_missing_data_and_misc_directories_are_not_created(tmp_path):
+    """An empty input workspace must remain unchanged during application startup."""
+    # Start the application before creating any dashboard input directories.
+    app = create_app(tmp_path)
+
+    # A valid empty dashboard still loads its packaged auxiliary references.
+    assert app is not None
+    assert data.stations is not None
+    assert data.bathy is not None
+    assert data.scan_datasets() == []
+
+    # Input paths are observational and therefore must never be materialized.
+    assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "misc").exists()
 
 
 def _post_callback(client, output, outputs, inputs, changed, states=None):

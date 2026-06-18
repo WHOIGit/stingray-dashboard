@@ -6,7 +6,7 @@ from pathlib import Path
 import dash
 
 from .callbacks import register_callbacks
-from .data import init_data_dirs, load_auxiliary_data
+from .data import init_data_paths, load_auxiliary_data
 from .layout import make_layout
 
 
@@ -49,7 +49,7 @@ def create_app(work_dir: str | Path | None = None) -> dash.Dash:
     """
     Build and configure the Dash application.
     """
-    init_data_dirs(work_dir)
+    init_data_paths(work_dir)
     load_auxiliary_data()
 
     dash_app = dash.Dash(

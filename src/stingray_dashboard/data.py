@@ -252,16 +252,17 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
         AVERAGE_CACHE[avg_key] = out
         return out
     
-def init_data_dirs(work_dir: str | Path | None = None) -> None:
+def init_data_paths(work_dir: str | Path | None = None) -> None:
     """
-    Initialize dashboard data directories.
+    Select the dashboard's read-only input paths.
 
     Directory contract:
       WORK_DIR/
         data/   dataset folders shown in the Dataset dropdown
-        misc/   station and bathymetry CSV files
+        misc/   optional station and bathymetry overrides
 
     If work_dir is None, prefer /dash_data when available, otherwise use ./dash_data.
+    Missing paths are left untouched; the dashboard never creates input files.
     """
     global WORK_DIR, DATA_DIR, MISC_DIR
 
@@ -273,9 +274,6 @@ def init_data_dirs(work_dir: str | Path | None = None) -> None:
 
     DATA_DIR = WORK_DIR / "data"
     MISC_DIR = WORK_DIR / "misc"
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    MISC_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_auxiliary_data() -> None:

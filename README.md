@@ -39,8 +39,8 @@ the selected folder appear in the data-file selector. For example:
 dash_data/data/stingray/20230807_EN706.csv
 ```
 
-The packaged station and bathymetry tables are used when corresponding files
-are absent from `misc/`.
+The station and bathymetry tables are shipped with the package. An optional
+`misc/` directory is needed only when a workspace provides replacement tables.
 
 ### CSV variables
 
@@ -152,23 +152,19 @@ volumes:
 
 ## Docker data requirements
 
-All Docker workflows mount the host workspace at `/dash_data` as read-only.
-The required directories must therefore exist before the container starts:
+The container treats `/dash_data` strictly as read-only input and never creates
+files or directories there. A workspace normally contains only dataset files:
 
 ```text
-dashboard_data/
-  data/    dashboard dataset directories and CSV files
-  misc/    optional workspace-specific station and bathymetry tables
+dash_data/
+  data/
+    <dataset_name>/
+      *.csv
 ```
 
-Create a new workspace before launching the container:
-
-```bash
-# Create both directories because the container cannot modify a read-only mount.
-mkdir -p dashboard_data/data dashboard_data/misc
-```
-
-Changing files below `dashboard_data/` does not require rebuilding the image.
+The packaged station and bathymetry tables are used automatically. Add
+`dash_data/misc/` only when supplying workspace-specific replacements. Changing
+dataset files does not require rebuilding the image.
 
 ## Run the published container image
 
@@ -176,18 +172,18 @@ GitHub Actions builds `ghcr.io/anhph95/stingray-dashboard` from repository
 source after every push to `main`. A Git tag such as `v2.1.0` also publishes
 versioned `2.1.0` and `2.1` image tags.
 
-Run the rolling image with an absolute host data path:
+Run the rolling image from the workspace that contains `dash_data/`:
 
 ```bash
 # Download the newest image published from the main branch.
 docker pull ghcr.io/anhph95/stingray-dashboard:latest
 
-# Start the application while keeping the host datasets read-only.
+# Start the application with the current workspace data mounted read-only.
 docker run -d \
   --name stingray-dashboard \
   --restart unless-stopped \
   -p 8050:8050 \
-  --mount "type=bind,source=/absolute/path/to/dashboard_data,target=/dash_data,readonly" \
+  -v "$(pwd)/dash_data:/dash_data:ro" \
   ghcr.io/anhph95/stingray-dashboard:latest
 ```
 
@@ -255,12 +251,12 @@ docker build \
   -t stingray-dashboard:git \
   "https://github.com/anhph95/stingraytools.git#main"
 
-# Run the locally built image with the host workspace mounted read-only.
+# Run the locally built image from the workspace containing dash_data/.
 docker run -d \
   --name stingray-dashboard \
   --restart unless-stopped \
   -p 8050:8050 \
-  --mount "type=bind,source=/absolute/path/to/dashboard_data,target=/dash_data,readonly" \
+  -v "$(pwd)/dash_data:/dash_data:ro" \
   stingray-dashboard:git
 ```
 
@@ -280,12 +276,12 @@ cd stingraytools
 # Build the dashboard package and assets from the current working tree.
 docker build -f Dockerfile.release -t stingray-dashboard:local .
 
-# Run the resulting image against an external read-only data workspace.
+# Run the resulting image from the workspace containing dash_data/.
 docker run -d \
   --name stingray-dashboard \
   --restart unless-stopped \
   -p 8050:8050 \
-  --mount "type=bind,source=/absolute/path/to/dashboard_data,target=/dash_data,readonly" \
+  -v "$(pwd)/dash_data:/dash_data:ro" \
   stingray-dashboard:local
 ```
 
