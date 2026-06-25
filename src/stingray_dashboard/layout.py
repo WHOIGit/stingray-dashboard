@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -12,6 +15,33 @@ from .config import (
     choose_default_dataset,
     meta_vars,
 )
+
+
+def _read_project_version() -> str:
+    for parent in Path(__file__).resolve().parents:
+        pyproject = parent / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+
+        in_project = False
+        for line in pyproject.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped == "[project]":
+                in_project = True
+                continue
+            if in_project and stripped.startswith("["):
+                break
+            if in_project and stripped.startswith("version"):
+                return stripped.split("=", 1)[1].strip().strip('"')
+
+    return "dev"
+
+
+try:
+    DASHBOARD_VERSION = version("stingray-dashboard")
+except PackageNotFoundError:
+    DASHBOARD_VERSION = _read_project_version()
+
 
 # ========================
 # App Layout 
@@ -367,10 +397,17 @@ def make_layout() -> html.Div:
         ], className='dashboard-body'),
         # ===== FOOTER =====
         html.Div([
-            html.Span('Developed by: Anh Pham, Sidney Batchelder, Joe Futrelle, Heidi Sosik'),
-            html.Span('anh.pham@whoi.edu')
+            html.Span(
+                'Developed by Sosik Lab @ WHOI | '
+                'Credits: Anh Pham, Sidney Batchelder, Joe Futrelle, Heidi Sosik',
+                className='footer-credit',
+            ),
+            html.Span(
+                f'Version {DASHBOARD_VERSION} | June 2026',
+                className='footer-version',
+            )
         ], className='footer')
-    ])
+    ], className='dashboard-shell')
 
 # ============================================================
 # === URL Synchronization & Dataset Management Callbacks ===

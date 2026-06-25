@@ -8,14 +8,29 @@ body {
   margin: 0;
   padding: 0;
   background-color: #fff;           /* white background */
-  overflow-x: auto;                 /* allow horizontal scroll if layout overflows */
+  overflow-x: hidden;
+  overflow-y: hidden;               /* keep the page chrome fixed while the plot area scrolls */
+}
+
+html,
+body {
+  height: 100%;
 }
 
 /* Dash container wrapper */
 ._dash-container {
   max-width: 1400px;                /* center content with max width */
   margin: auto;
-  padding: 6px;
+  padding: 6px 6px 0;
+  box-sizing: border-box;
+}
+
+.dashboard-shell {
+  height: calc(100vh - 6px);        /* account for top Dash container padding */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Headings */
@@ -112,9 +127,24 @@ h1, h2, h3 {
 .footer {
   background-color: #183554;
   color: white;
-  padding: 6px 24px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 16px;
+  padding: 8px 24px;
   font-size: 13px;
+  line-height: 1.25;
   box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+}
+
+.footer-credit,
+.footer-version {
+  white-space: nowrap;
+}
+
+.footer-version {
+  text-align: right;
 }
 
 
@@ -219,6 +249,11 @@ select {
   flex-direction: column;
   gap: 4px;
   margin-bottom: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: #fff;
+  padding-bottom: 2px;
 }
 
 .global-panel {
@@ -262,6 +297,10 @@ select {
 
 .dashboard-body {
   width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding-right: 4px;
   box-sizing: border-box;
 }
 
@@ -397,6 +436,22 @@ select {
 /* Small screens (stack layout) */
 @media (max-width: 900px) {
 
+  body {
+    overflow-y: auto;
+  }
+
+  ._dash-container {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .dashboard-shell {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
   .flex-row {
     flex-direction: column;
   }
@@ -424,6 +479,16 @@ select {
 
   .global-panel {
     display: block;
+  }
+
+  .global-controls {
+    position: static;
+  }
+
+  .dashboard-body {
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .plot-row > .right-slot:empty {
