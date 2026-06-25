@@ -92,6 +92,12 @@ The dashboard works best when each CSV contains:
 - Numeric sensor variables such as `chlorophyll`, `nitrate`, `par`, or `oxygen_concentration`.
 - Optional `media` and `frame` columns for linked ISIIS imagery.
 
+When `media` and `frame` are present, the dashboard can build frame-viewer
+links for selected observations. Those links are intended for a compatible
+Stingray frame service such as
+[WHOIGit/stingray-frame-viewer](https://github.com/WHOIGit/stingray-frame-viewer),
+which serves individual Stingray video frames to browsers.
+
 Common source names such as `lat`, `lon`, `t090`, `sal00`, and `pressure` are
 normalized to canonical dashboard columns. Instrument-altitude sentinel values
 equal to `9999.99` are treated as missing data so they do not distort plot
@@ -152,23 +158,19 @@ dataset files does not require rebuilding the image.
 ## Run the released image directly
 
 GitHub Actions builds `ghcr.io/anhph95/stingray-dashboard` from repository
-source after every push to `main`. A Git tag such as `v2.1.0` also publishes
-versioned `2.1.0` and `2.1` image tags.
+source after every push to `main`. The `v3.0.0` Git tag publishes versioned
+`3.0.0` and `3.0` image tags.
 
-Use this direct `docker run` workflow when Compose is not available:
+Run these commands from the directory that contains `dash_data/`:
 
 ```bash
-# Download the newest image published from the main branch.
-docker pull ghcr.io/anhph95/stingray-dashboard:latest
-
-# Start the application with the current workspace data mounted read-only.
 docker run -d \
   --name stingray-dashboard \
   --restart unless-stopped \
   -p 8050:8050 \
   -e STINGRAY_DASHBOARD_PORT=8050 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  ghcr.io/anhph95/stingray-dashboard:latest
+  ghcr.io/anhph95/stingray-dashboard:3.0.0
 ```
 
 If host port `8050` is already in use, choose another host port without
@@ -181,11 +183,10 @@ docker run -d \
   -p 8051:8050 \
   -e STINGRAY_DASHBOARD_PORT=8051 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  ghcr.io/anhph95/stingray-dashboard:latest
+  ghcr.io/anhph95/stingray-dashboard:3.0.0
 ```
 
-For reproducible production deployment, replace `latest` with a version such as
-`2.1.0`. Stop and remove the container with:
+Stop and remove the container with:
 
 ```bash
 # Remove the application container without touching the bind-mounted host data.
