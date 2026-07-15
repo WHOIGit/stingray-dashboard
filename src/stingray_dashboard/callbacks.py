@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import dash
@@ -8,9 +12,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from dash import Input, Output, Patch, State, ctx, dcc, html, no_update
+from flask import has_request_context, request
 
 from . import data
 from .config import (
+    DOWNLOADS_ENABLED,
     URL_SYNCED_PARAMS,
     choose_default_dataset,
     get_unit,
@@ -26,6 +32,13 @@ from .plot_utils import (
     resolve_range,
 )
 from .science import density_grid
+
+logger = logging.getLogger(__name__)
+EMAIL_RE = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
 
 def _serialize_url_value(value, typ):
     if value is None:
@@ -56,6 +69,42 @@ def _deserialize_url_value(raw, typ, default=None):
             return []
         return [x for x in raw.split(",") if x != ""]
     return default
+
+def _is_valid_email(email: str | None) -> bool:
+    return bool(email and EMAIL_RE.fullmatch(email.strip()))
+
+def _is_present(value: str | None) -> bool:
+    return bool(value and value.strip())
+
+def _clean_log_value(value: str) -> str:
+    return " ".join(value.strip().split())
+
+def _log_csv_download(
+    dataset: str,
+    csv_file: str,
+    csv_path,
+    name: str,
+    email: str,
+    institution: str,
+) -> None:
+    logs_dir = Path.cwd() / "logs"
+    timestamp = datetime.now(timezone.utc).isoformat()
+    remote_addr = "-"
+    user_agent = "-"
+    if has_request_context():
+        remote_addr = request.headers.get("X-Forwarded-For", request.remote_addr or "-")
+        user_agent = request.headers.get("User-Agent", "-")
+    line = (
+        f"{timestamp}\tname={name}\temail={email}\tinstitution={institution}"
+        f"\tdataset={dataset}\tfile={csv_file}.csv"
+        f"\tpath={csv_path}\tremote_addr={remote_addr}\tuser_agent={user_agent}\n"
+    )
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        with (logs_dir / "dashboard_downloads.log").open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError:
+        logger.warning("Could not write CSV download log entry", exc_info=True)
 
 def register_callbacks(app: dash.Dash) -> None:
     # Extract only trace-wise point IDs in the browser. Selection callbacks
@@ -99,6 +148,19 @@ def register_callbacks(app: dash.Dash) -> None:
         Output("ts_plot_point_ids", "data"),
         Input("ts_plot", "figure"),
     )
+
+    @app.callback(
+        Output('download-confirm-button', 'disabled'),
+        Input('download-name', 'value'),
+        Input('download-email', 'value'),
+        Input('download-institution', 'value'),
+    )
+    def toggle_download_confirm_button(name, email, institution):
+        return not (
+            _is_present(name)
+            and _is_valid_email(email)
+            and _is_present(institution)
+        )
 
     # --- Callback: Update URL query string based on current UI state ---
     @app.callback(
@@ -576,20 +638,78 @@ def register_callbacks(app: dash.Dash) -> None:
         ]
         return {"selected_ids": selected_ids}
 
-    # # --- Callback: Download CSV file ---
-    # @app.callback(
-    #     Output('download_dataframe_csv', 'data'),
-    #     Input('download-button', 'n_clicks'),
-    #     State('dataset_selector', 'value'),
-    #     State('csv_selector', 'value'),
-    #     prevent_initial_call=True
-    # )
-    # def download_csv(n_clicks, dataset, csv_file):
-    #     '''Download the selected CSV file.'''
-    #     if ctx.triggered_id == 'download-button' and csv_file:
-    #         df = data.load_data(dataset,csv_file)
-    #         return dcc.send_data_frame(df.to_csv, filename=f'{csv_file}.csv', index=False)
-    #     return no_update
+    # --- Callback: Download CSV file ---
+    @app.callback(
+        Output('download_dataframe_csv', 'data'),
+        Output('download-modal-backdrop', 'className'),
+        Output('download-status', 'children'),
+        Input('download-button', 'n_clicks'),
+        Input('download-confirm-button', 'n_clicks'),
+        Input('download-cancel-button', 'n_clicks'),
+        Input('download-cancel-x', 'n_clicks'),
+        State('dataset_selector', 'value'),
+        State('csv_selector', 'value'),
+        State('download-name', 'value'),
+        State('download-email', 'value'),
+        State('download-institution', 'value'),
+        prevent_initial_call=True
+    )
+    def download_csv(
+        n_clicks,
+        confirm_clicks,
+        cancel_clicks,
+        cancel_x_clicks,
+        dataset,
+        csv_file,
+        name,
+        email,
+        institution,
+    ):
+        """Download the selected raw CSV file and audit the request."""
+        if (
+            not DOWNLOADS_ENABLED
+            or ctx.triggered_id is None
+        ):
+            return no_update, no_update, no_update
+
+        if ctx.triggered_id == 'download-button':
+            if not n_clicks:
+                return no_update, no_update, no_update
+            return no_update, 'download-modal-backdrop', ''
+
+        if ctx.triggered_id in ('download-cancel-button', 'download-cancel-x'):
+            if not (cancel_clicks or cancel_x_clicks):
+                return no_update, no_update, no_update
+            return no_update, 'download-modal-backdrop hidden', ''
+
+        if ctx.triggered_id != 'download-confirm-button' or not confirm_clicks:
+            return no_update, no_update, no_update
+
+        if not _is_present(name):
+            return no_update, 'download-modal-backdrop', "Enter your name to download."
+        if not _is_valid_email(email):
+            return no_update, 'download-modal-backdrop', "Enter a valid email to download."
+        if not _is_present(institution):
+            return no_update, 'download-modal-backdrop', "Enter your institution to download."
+        if (
+            not dataset
+            or not csv_file
+        ):
+            return no_update, 'download-modal-backdrop', ''
+
+        csv_path = data.DATA_DIR / dataset / f"{csv_file}.csv"
+        if not csv_path.is_file():
+            return no_update, 'download-modal-backdrop', ''
+
+        name = _clean_log_value(name)
+        email = email.strip()
+        institution = _clean_log_value(institution)
+        _log_csv_download(dataset, csv_file, csv_path, name, email, institution)
+        return (
+            dcc.send_file(csv_path, filename=f"{csv_file}.csv"),
+            'download-modal-backdrop hidden',
+            '',
+        )
 
     # ============================================================
     # === Main Plot Update: Depth vs. Variable / Coordinate ===

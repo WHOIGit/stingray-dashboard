@@ -12,6 +12,7 @@ from . import data
 from .config import (
     DEFAULT_MAX_TIME_GAP_SEC,
     DEFAULT_SUBSAMPLE,
+    DOWNLOADS_ENABLED,
     choose_default_dataset,
     meta_vars,
 )
@@ -172,9 +173,44 @@ def make_layout() -> html.Div:
                         dcc.Input(id='plot_font_size', type='number', value=14, debounce=True)
                     ], className='control-field'),
                     html.Button('Refresh list', id='refresh-button'),
+                    html.Button(
+                        'Download CSV',
+                        id='download-button',
+                        disabled=not DOWNLOADS_ENABLED,
+                    ),
+                    dcc.Download(id='download_dataframe_csv'),
                 ], className='global-fields'),
             ], className='panel global-panel options-panel'),
         ], className='global-controls'),
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.Div('Download CSV', className='download-modal-title'),
+                    html.Button('×', id='download-cancel-x', className='modal-close-button'),
+                ], className='download-modal-header'),
+                html.Div([
+                    html.Label('Name:'),
+                    dcc.Input(id='download-name', type='text'),
+                ], className='control-field'),
+                html.Div([
+                    html.Label('Email:'),
+                    dcc.Input(
+                        id='download-email',
+                        type='email',
+                        placeholder='name@example.org',
+                    ),
+                ], className='control-field'),
+                html.Div([
+                    html.Label('Institution:'),
+                    dcc.Input(id='download-institution', type='text'),
+                ], className='control-field'),
+                html.Div(id='download-status', className='download-status'),
+                html.Div([
+                    html.Button('Cancel', id='download-cancel-button', className='modal-secondary-button'),
+                    html.Button('Download', id='download-confirm-button', disabled=True),
+                ], className='download-modal-actions'),
+            ], className='download-modal'),
+        ], id='download-modal-backdrop', className='download-modal-backdrop hidden'),
         # ===== MAIN BODY =====
         html.Div([
             html.Div([

@@ -10,35 +10,23 @@ image from GitHub Container Registry, so neither a source checkout nor a local
 image build is required. The container reads dashboard-ready files from the
 host workspace and never modifies them.
 
+Run these commands from the directory that contains `dash_data/`.
+
 Unix shell:
 
 ```bash
-# Download the Compose definition that runs the published GHCR image.
 curl -O https://raw.githubusercontent.com/anhph95/stingraytools/main/compose.ghcr.yml
-
-# Pull the selected release before starting the service.
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml pull
-
-# Start the released image with dashboard data mounted read-only.
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-STINGRAY_DEFAULT_DATASET=stingray \
-  docker compose -f compose.ghcr.yml up -d --pull always
+docker compose -f compose.ghcr.yml pull
+docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
 Windows PowerShell:
 
 ```powershell
-# Download the Compose definition that runs the published GHCR image.
 Invoke-WebRequest `
   -Uri "https://raw.githubusercontent.com/anhph95/stingraytools/main/compose.ghcr.yml" `
   -OutFile "compose.ghcr.yml"
 
-# Select the host workspace and initial dataset.
-$env:DASH_DATA_DIR = "C:\path\to\dash_data"
-$env:STINGRAY_DEFAULT_DATASET = "stingray"
-
-# Pull and start the released image.
 docker compose -f compose.ghcr.yml pull
 docker compose -f compose.ghcr.yml up -d --pull always
 ```
@@ -47,9 +35,7 @@ Open `http://127.0.0.1:8050`. Leave `STINGRAY_DEFAULT_DATASET` unset to open
 the first dataset folder under `dash_data/data/`. Set
 `STINGRAY_DASHBOARD_PORT=8051` when host port `8050` is unavailable.
 
-The default image is `ghcr.io/anhph95/stingray-dashboard:latest`. For a
-reproducible server deployment, set `STINGRAY_DASHBOARD_IMAGE` to a released
-version tag such as `ghcr.io/anhph95/stingray-dashboard:2.1.0`.
+The default Compose image is `ghcr.io/anhph95/stingray-dashboard:3.0.0`.
 
 ## Data layout
 
@@ -201,33 +187,20 @@ These commands cover routine release updates and deployment customization.
 Update the application while preserving the mounted datasets:
 
 ```bash
-# Pull the image selected by the Compose environment variables.
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml pull
-
-# Recreate the service only when the downloaded image has changed.
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml up -d --pull always
+docker compose -f compose.ghcr.yml pull
+docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
-Pin an application release and optionally change the host port:
+Run on host port `8051`:
 
 ```bash
-# Select an immutable application version and expose it on host port 8051.
-STINGRAY_DASHBOARD_IMAGE=ghcr.io/anhph95/stingray-dashboard:2.1.0 \
-STINGRAY_DASHBOARD_PORT=8051 \
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml up -d --pull always
+STINGRAY_DASHBOARD_PORT=8051 docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
-Pin the initial dataset on a remote server when the mounted workspace contains
-multiple dataset folders:
+Open `dash_data/data/stingray` by default when multiple dataset folders exist:
 
 ```bash
-# Open dash_data/data/stingray by default while preserving the same read-only mount.
-DASH_DATA_DIR=/mnt/stingray_share/dash_data \
-STINGRAY_DEFAULT_DATASET=stingray \
-  docker compose -f compose.ghcr.yml up -d --pull always
+STINGRAY_DEFAULT_DATASET=stingray docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
 Leave `STINGRAY_DEFAULT_DATASET` unset to open the first available dataset
@@ -236,9 +209,7 @@ folder under `/dash_data/data`.
 Stop the Compose deployment:
 
 ```bash
-# Remove the Compose service and network while preserving host datasets.
-DASH_DATA_DIR=/absolute/path/to/dash_data \
-  docker compose -f compose.ghcr.yml down
+docker compose -f compose.ghcr.yml down
 ```
 
 ## Build from a local checkout
@@ -339,7 +310,7 @@ and commit only source code, packaged reference tables, and tests.
 Maintainers do not build or upload release images manually:
 
 1. Push to `main` to publish `latest` and a commit-specific `sha-*` tag.
-2. Create and push a version tag such as `v2.1.0` to publish `2.1.0` and `2.1`.
+2. Create and push a version tag such as `v3.0.0` to publish `3.0.0` and `3.0`.
 3. Make the container package public in the repository Packages settings so users can pull it without registry authentication.
 
 The commit-specific tag provides an immutable deployment identity, a semantic

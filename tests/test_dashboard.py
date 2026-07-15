@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from stingray_dashboard import data
@@ -44,6 +46,169 @@ def test_dashboard_loads_example_dataset(tmp_path):
     assert app is not None
     assert data.scan_datasets() == ["stingray"]
     assert data.get_csv_files("stingray") == ["example"]
+
+
+def test_selected_csv_can_be_downloaded_and_logs_audit_entry(tmp_path, monkeypatch):
+    """The selected raw CSV should download and leave an audit record."""
+    _write_example_csv(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+    app = create_app(tmp_path)
+
+    client = app.server.test_client()
+    result = _post_callback(
+        client,
+        "..download_dataframe_csv.data...download-modal-backdrop.className...download-status.children..",
+        [
+            {"id": "download_dataframe_csv", "property": "data"},
+            {"id": "download-modal-backdrop", "property": "className"},
+            {"id": "download-status", "property": "children"},
+        ],
+        [
+            ("download-button", "n_clicks", 1),
+            ("download-confirm-button", "n_clicks", 1),
+            ("download-cancel-button", "n_clicks", None),
+            ("download-cancel-x", "n_clicks", None),
+        ],
+        "download-confirm-button.n_clicks",
+        [
+            ("dataset_selector", "value", "stingray"),
+            ("csv_selector", "value", "example"),
+            ("download-name", "value", "Jane Scientist"),
+            ("download-email", "value", "science@example.org"),
+            ("download-institution", "value", "WHOI"),
+        ],
+    )
+
+    download = result["response"]["download_dataframe_csv"]["data"]
+    assert download["filename"] == "example.csv"
+    assert download["base64"] is True
+    assert result["response"]["download-modal-backdrop"]["className"] == (
+        "download-modal-backdrop hidden"
+    )
+    assert result["response"]["download-status"]["children"] == ""
+
+    log_path = Path.cwd() / "logs" / "dashboard_downloads.log"
+    assert log_path.is_file()
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "name=Jane Scientist" in log_text
+    assert "email=science@example.org" in log_text
+    assert "institution=WHOI" in log_text
+    assert "dataset=stingray" in log_text
+    assert "file=example.csv" in log_text
+
+
+def test_download_button_opens_email_modal(tmp_path, monkeypatch):
+    """The main download button should open the required-information modal."""
+    _write_example_csv(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+    app = create_app(tmp_path)
+
+    result = _post_callback(
+        app.server.test_client(),
+        "..download_dataframe_csv.data...download-modal-backdrop.className...download-status.children..",
+        [
+            {"id": "download_dataframe_csv", "property": "data"},
+            {"id": "download-modal-backdrop", "property": "className"},
+            {"id": "download-status", "property": "children"},
+        ],
+        [
+            ("download-button", "n_clicks", 1),
+            ("download-confirm-button", "n_clicks", None),
+            ("download-cancel-button", "n_clicks", None),
+            ("download-cancel-x", "n_clicks", None),
+        ],
+        "download-button.n_clicks",
+        [
+            ("dataset_selector", "value", "stingray"),
+            ("csv_selector", "value", "example"),
+            ("download-name", "value", None),
+            ("download-email", "value", None),
+            ("download-institution", "value", None),
+        ],
+    )
+
+    assert "download_dataframe_csv" not in result["response"]
+    assert result["response"]["download-modal-backdrop"]["className"] == (
+        "download-modal-backdrop"
+    )
+    assert result["response"]["download-status"]["children"] == ""
+
+
+def test_download_modal_button_requires_complete_contact_info(tmp_path):
+    """The modal download action should only enable for complete valid contact info."""
+    _write_example_csv(tmp_path)
+    app = create_app(tmp_path)
+
+    invalid = _post_callback(
+        app.server.test_client(),
+        "download-confirm-button.disabled",
+        {"id": "download-confirm-button", "property": "disabled"},
+        [
+            ("download-name", "value", "Jane Scientist"),
+            ("download-email", "value", "not-an-email"),
+            ("download-institution", "value", "WHOI"),
+        ],
+        "download-email.value",
+    )
+    assert invalid["response"]["download-confirm-button"]["disabled"] is True
+
+    valid = _post_callback(
+        app.server.test_client(),
+        "download-confirm-button.disabled",
+        {"id": "download-confirm-button", "property": "disabled"},
+        [
+            ("download-name", "value", "Jane Scientist"),
+            ("download-email", "value", "science@example.org"),
+            ("download-institution", "value", "WHOI"),
+        ],
+        "download-email.value",
+    )
+    assert valid["response"]["download-confirm-button"]["disabled"] is False
+
+
+def test_selected_csv_download_requires_valid_email(tmp_path, monkeypatch):
+    """Downloads should not start until the user provides a valid email."""
+    _write_example_csv(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+    app = create_app(tmp_path)
+
+    result = _post_callback(
+        app.server.test_client(),
+        "..download_dataframe_csv.data...download-modal-backdrop.className...download-status.children..",
+        [
+            {"id": "download_dataframe_csv", "property": "data"},
+            {"id": "download-modal-backdrop", "property": "className"},
+            {"id": "download-status", "property": "children"},
+        ],
+        [
+            ("download-button", "n_clicks", 1),
+            ("download-confirm-button", "n_clicks", 1),
+            ("download-cancel-button", "n_clicks", None),
+            ("download-cancel-x", "n_clicks", None),
+        ],
+        "download-confirm-button.n_clicks",
+        [
+            ("dataset_selector", "value", "stingray"),
+            ("csv_selector", "value", "example"),
+            ("download-name", "value", "Jane Scientist"),
+            ("download-email", "value", "not-an-email"),
+            ("download-institution", "value", "WHOI"),
+        ],
+    )
+
+    assert "download_dataframe_csv" not in result["response"]
+    assert result["response"]["download-modal-backdrop"]["className"] == (
+        "download-modal-backdrop"
+    )
+    assert result["response"]["download-status"]["children"] == (
+        "Enter a valid email to download."
+    )
 
 
 def _post_callback(client, output, outputs, inputs, changed, states=None):

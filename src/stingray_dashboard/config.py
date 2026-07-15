@@ -14,6 +14,10 @@ meta_vars = [
 ]
 
 DEFAULT_DATASET = os.getenv("STINGRAY_DEFAULT_DATASET", "")
+DOWNLOADS_ENABLED = (
+    os.getenv("STINGRAY_DASHBOARD_DOWNLOADS_ENABLED", "true").lower()
+    not in {"0", "false", "no", "off"}
+)
 
 
 def set_default_dataset(dataset: str | None) -> None:
