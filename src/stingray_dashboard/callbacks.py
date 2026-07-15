@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
-from pathlib import Path
+import re
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import dash
@@ -87,7 +86,7 @@ def _log_csv_download(
     email: str,
     institution: str,
 ) -> None:
-    logs_dir = Path.cwd() / "logs"
+    logs_dir = data.WORK_DIR / "logs"
     timestamp = datetime.now(timezone.utc).isoformat()
     remote_addr = "-"
     user_agent = "-"

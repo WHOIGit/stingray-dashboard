@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from stingray_dashboard import data
@@ -48,12 +46,9 @@ def test_dashboard_loads_example_dataset(tmp_path):
     assert data.get_csv_files("stingray") == ["example"]
 
 
-def test_selected_csv_can_be_downloaded_and_logs_audit_entry(tmp_path, monkeypatch):
+def test_selected_csv_can_be_downloaded_and_logs_audit_entry(tmp_path):
     """The selected raw CSV should download and leave an audit record."""
     _write_example_csv(tmp_path)
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    monkeypatch.chdir(run_dir)
     app = create_app(tmp_path)
 
     client = app.server.test_client()
@@ -89,7 +84,7 @@ def test_selected_csv_can_be_downloaded_and_logs_audit_entry(tmp_path, monkeypat
     )
     assert result["response"]["download-status"]["children"] == ""
 
-    log_path = Path.cwd() / "logs" / "dashboard_downloads.log"
+    log_path = tmp_path / "logs" / "dashboard_downloads.log"
     assert log_path.is_file()
     log_text = log_path.read_text(encoding="utf-8")
     assert "name=Jane Scientist" in log_text
@@ -99,12 +94,9 @@ def test_selected_csv_can_be_downloaded_and_logs_audit_entry(tmp_path, monkeypat
     assert "file=example.csv" in log_text
 
 
-def test_download_button_opens_email_modal(tmp_path, monkeypatch):
+def test_download_button_opens_email_modal(tmp_path):
     """The main download button should open the required-information modal."""
     _write_example_csv(tmp_path)
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    monkeypatch.chdir(run_dir)
     app = create_app(tmp_path)
 
     result = _post_callback(
@@ -170,12 +162,9 @@ def test_download_modal_button_requires_complete_contact_info(tmp_path):
     assert valid["response"]["download-confirm-button"]["disabled"] is False
 
 
-def test_selected_csv_download_requires_valid_email(tmp_path, monkeypatch):
+def test_selected_csv_download_requires_valid_email(tmp_path):
     """Downloads should not start until the user provides a valid email."""
     _write_example_csv(tmp_path)
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    monkeypatch.chdir(run_dir)
     app = create_app(tmp_path)
 
     result = _post_callback(
