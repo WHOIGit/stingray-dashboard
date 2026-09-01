@@ -248,6 +248,10 @@ def test_main_plot_renders_example_dataset(tmp_path):
             ("v_max", "value", None),
             ("z_min", "value", 0),
             ("z_max", "value", 30),
+            ("lat_min", "value", None),
+            ("lat_max", "value", None),
+            ("lon_min", "value", None),
+            ("lon_max", "value", None),
             ("hidden_opacity", "value", 0.1),
             ("plot_font_size", "value", 14),
             ("bathymetry", "value", []),
@@ -268,6 +272,53 @@ def test_main_plot_renders_example_dataset(tmp_path):
     assert sum(len(trace["x"]) for trace in figure["data"]) == 6
     assert figure["layout"]["xaxis"]["title"]["text"] == "Latitude"
     assert figure["layout"]["yaxis"]["title"]["text"] == "Depth (m)"
+
+
+def test_main_plot_uses_manual_coordinate_limits(tmp_path):
+    """Manual lat/lon limits should apply to either main-plot axis."""
+    _write_example_csv(tmp_path)
+    app = create_app(tmp_path)
+
+    result = _post_callback(
+        app.server.test_client(),
+        "main_plot.figure",
+        {"id": "main_plot", "property": "figure"},
+        [
+            ("dataset_selector", "value", "stingray"),
+            ("csv_selector", "value", "example"),
+            ("sub_sample", "value", 1),
+            ("sampling_mode", "value", "subsample"),
+            ("x_axis_variable", "value", "latitude"),
+            ("y_axis_variable", "value", "longitude"),
+            ("color_variable", "value", "cast"),
+            ("color_map", "value", "Plotly"),
+            ("size", "value", 5),
+            ("v_min", "value", None),
+            ("v_max", "value", None),
+            ("z_min", "value", 0),
+            ("z_max", "value", 30),
+            ("lat_min", "value", 39.9),
+            ("lat_max", "value", 40.2),
+            ("lon_min", "value", -70.2),
+            ("lon_max", "value", -69.9),
+            ("hidden_opacity", "value", 0.1),
+            ("plot_font_size", "value", 14),
+            ("bathymetry", "value", []),
+            ("station", "value", []),
+            (
+                "cruise_track_selection_store",
+                "data",
+                {"mode": "all", "selected_ids": None},
+            ),
+            ("main_plot", "relayoutData", None),
+        ],
+        "lat_min.value",
+    )
+
+    figure = result["response"]["main_plot"]["figure"]
+    assert figure["layout"]["xaxis"]["range"] == [40.2, 39.9]
+    assert "autorange" not in figure["layout"]["xaxis"]
+    assert figure["layout"]["yaxis"]["range"] == [-70.2, -69.9]
 
 
 def test_ts_plot_renders_numeric_and_categorical_data(tmp_path):

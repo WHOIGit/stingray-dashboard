@@ -729,6 +729,10 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('v_max', 'value'),
             Input('z_min', 'value'),
             Input('z_max', 'value'),
+            Input('lat_min', 'value'),
+            Input('lat_max', 'value'),
+            Input('lon_min', 'value'),
+            Input('lon_max', 'value'),
             Input('hidden_opacity', 'value'),
             Input('plot_font_size', 'value'),
             Input('bathymetry', 'value'),
@@ -740,7 +744,7 @@ def register_callbacks(app: dash.Dash) -> None:
     def update_main_plot(
         dataset, csv_file, sub_sample, sampling_mode,
         x_axis, y_axis, color_var, color_map, size,
-        vmin, vmax, zmin, zmax,
+        vmin, vmax, zmin, zmax, latmin, latmax, lonmin, lonmax,
         hidden_opacity, fontsize, bathymetry, station,
         cruise_track_selection, relayoutData
     ):
@@ -944,6 +948,10 @@ def register_callbacks(app: dash.Dash) -> None:
         # ------------------------------------------------------------------
         visible_xrange = get_visible_range("xaxis", relayoutData)
         visible_yrange = get_visible_range("yaxis", relayoutData)
+        coord_limits = {
+            "latitude": (latmin, latmax),
+            "longitude": (lonmin, lonmax),
+        }
         # -------------------------
         # X axis
         # -------------------------
@@ -952,10 +960,15 @@ def register_callbacks(app: dash.Dash) -> None:
         if x_axis == "times":
             x_range = [df["times"].min(), df["times"].max()]
         elif x_axis in df.columns:
-            xmin, xmax = resolve_range(visible_xrange, df[x_axis])
+            xmin, xmax = resolve_range(
+                visible_xrange,
+                df[x_axis],
+                *coord_limits.get(x_axis, (None, None))
+            )
             xticks, digits = dynamic_ticks(xmin, xmax, nticks=6)
             x_range = [xmin, xmax]
             if x_axis == "latitude":
+                x_range = [xmax, xmin]
                 xticktext = [
                     f"{abs(v):.{digits}f}°{'N' if v >= 0 else 'S'}"
                     for v in xticks
@@ -986,7 +999,11 @@ def register_callbacks(app: dash.Dash) -> None:
                 ylabel = "Depth (m)"
                 y_range = [ymax, ymin]
             else:
-                ymin, ymax = resolve_range(visible_yrange, df[y_axis])
+                ymin, ymax = resolve_range(
+                    visible_yrange,
+                    df[y_axis],
+                    *coord_limits.get(y_axis, (None, None))
+                )
                 y_range = [ymin, ymax]
             if y_axis in ["latitude", "longitude"]:
                 yticks, digits = dynamic_ticks(ymin, ymax, nticks=6)
@@ -1041,7 +1058,6 @@ def register_callbacks(app: dash.Dash) -> None:
             xaxis=dict(
                 title=x_axis.capitalize(),
                 range=x_range,
-                autorange="reversed" if x_axis == "latitude" else None,
                 tickvals=xticks,
                 ticktext=xticktext,
                 tickmode="array",

@@ -307,6 +307,22 @@ def make_layout() -> html.Div:
                             dcc.Input(id='z_max', type='number', value=200, debounce=True)
                         ], className='control-field'),
                         html.Div([
+                            html.Label('Lat Min:'),
+                            dcc.Input(id='lat_min', type='number', debounce=True)
+                        ], className='control-field'),
+                        html.Div([
+                            html.Label('Lat Max:'),
+                            dcc.Input(id='lat_max', type='number', debounce=True)
+                        ], className='control-field'),
+                        html.Div([
+                            html.Label('Lon Min:'),
+                            dcc.Input(id='lon_min', type='number', debounce=True)
+                        ], className='control-field'),
+                        html.Div([
+                            html.Label('Lon Max:'),
+                            dcc.Input(id='lon_max', type='number', debounce=True)
+                        ], className='control-field'),
+                        html.Div([
                             html.Label('Color Min:'),
                             dcc.Input(id='v_min', type='number', debounce=True)
                         ], className='control-field'),
@@ -372,7 +388,7 @@ def make_layout() -> html.Div:
                         ], className='control-field'),
                         html.Div([
                             html.Label('TS H:'),
-                            dcc.Input(id='ts_height', type='number', value=560, debounce=True)
+                            dcc.Input(id='ts_height', type='number', value=660, debounce=True)
                         ], className='control-field'),
                     ], className='panel plot-controls'),
                     html.Div([

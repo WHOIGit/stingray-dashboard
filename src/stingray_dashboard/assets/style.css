@@ -194,6 +194,7 @@ label {
 /* Input boxes */
 input[type="number"],
 input[type="text"],
+input[type="email"],
 select {
   font-size: 13px;
   width: 100%;
