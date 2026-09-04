@@ -214,10 +214,7 @@ docker compose -f compose.ghcr.yml down
 
 ## Build from a local checkout
 
-This section is for dashboard development only. Normal users and deployments
-should run a released GHCR image as described above. Developers can build the
-exact checked-out source, including uncommitted local changes, from the
-repository root:
+Build the checked-out dashboard source from the repository root:
 
 ```bash
 # Clone and enter the source repository.
@@ -301,9 +298,9 @@ pip install -e ".[dev]"
 pytest packages/stingray-dashboard/tests
 ```
 
-Runtime datasets below `dash_data/` are intentionally excluded from version
-control. Keep large or institution-specific CSV files in the local workspace
-and commit only source code, packaged reference tables, and tests.
+Runtime datasets below `dash_data/` are excluded from version control. Store
+large or institution-specific CSV files in the local workspace. Commit source
+code, packaged reference tables, and tests.
 
 ## Container release process
 
