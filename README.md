@@ -244,14 +244,14 @@ Install the dashboard directly from Git:
 
 ```bash
 # Install the dashboard package from the Git repository.
-pip install "stingray-dashboard @ git+https://github.com/anhph95/StingrayTools.git#subdirectory=packages/stingray-dashboard"
+pip install "stingray-dashboard @ git+https://github.com/anhph95/stingraytools.git#subdirectory=packages/stingray-dashboard"
 ```
 
 For a Linux server deployment with Gunicorn:
 
 ```bash
 # Install the dashboard package with server runtime dependencies.
-pip install "stingray-dashboard[server] @ git+https://github.com/anhph95/StingrayTools.git#subdirectory=packages/stingray-dashboard"
+pip install "stingray-dashboard[server] @ git+https://github.com/anhph95/stingraytools.git#subdirectory=packages/stingray-dashboard"
 ```
 
 Start the installed application with an explicit work directory:
@@ -281,8 +281,7 @@ stingray-dashboard --help
 
 ## Development and tests
 
-Run these commands from the repository root so the editable install includes all
-project packages and development dependencies:
+Run these commands from the repository root:
 
 ```bash
 # Create an isolated project-local Python environment.
@@ -291,8 +290,8 @@ python -m venv .venv
 # Activate the environment on Linux or macOS.
 source .venv/bin/activate
 
-# Install the repository in editable mode with test dependencies.
-pip install -e ".[dev]"
+# Install the dashboard package in editable mode with test dependencies.
+pip install -e "./packages/stingray-dashboard[dev]"
 
 # Run the dashboard regression tests.
 pytest packages/stingray-dashboard/tests
