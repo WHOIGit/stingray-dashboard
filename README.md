@@ -1,7 +1,7 @@
 # stingray-dashboard
 
-Installable Dash application for interactive exploration of NES-LTER Stingray /
-ISIIS dashboard data.
+Installable Dash application for interactive exploration of NES-LTER Stingray
+dashboard data.
 
 ## Run the released image with Compose
 
@@ -53,10 +53,10 @@ dash_data/
 ```
 
 Dataset folders below `data/` appear in the dataset selector. CSV files inside
-the selected folder appear in the data-file selector. For example:
+the selected folder appear in the data-file selector:
 
 ```text
-dash_data/data/stingray/20230807_EN706.csv
+dash_data/data/DATASET_NAME/DATA_FILE.csv
 ```
 
 By default, the dashboard opens the first dataset folder found under `data/`.
@@ -76,7 +76,7 @@ The dashboard works best when each CSV contains:
 - `temperature` and `salinity` for the T-S diagram and density contours.
 - `cast` for individual vertical profiles.
 - Numeric sensor variables such as `chlorophyll`, `nitrate`, `par`, or `oxygen_concentration`.
-- Optional `media` and `frame` columns for linked ISIIS imagery.
+- Optional `media` and `frame` columns for linked imagery.
 
 When `media` and `frame` are present, the dashboard can build frame-viewer
 links for selected observations. Those links are intended for a compatible
@@ -197,10 +197,10 @@ Run on host port `8051`:
 STINGRAY_DASHBOARD_PORT=8051 docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
-Open `dash_data/data/stingray` by default when multiple dataset folders exist:
+Open a named dataset folder by default when multiple dataset folders exist:
 
 ```bash
-STINGRAY_DEFAULT_DATASET=stingray docker compose -f compose.ghcr.yml up -d --pull always
+STINGRAY_DEFAULT_DATASET=DATASET_NAME docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
 Leave `STINGRAY_DEFAULT_DATASET` unset to open the first available dataset
@@ -261,13 +261,13 @@ Start the installed application with an explicit work directory:
 stingray-dashboard --work-dir dash_data --host 0.0.0.0 --port 8050
 ```
 
-Select the initial dataset explicitly when checking processed Stingray output:
+Select the initial dataset explicitly when checking processed output:
 
 ```bash
-# Open dash_data/data/stingray first, even if other dataset folders exist.
+# Open the named dataset first, even if other dataset folders exist.
 stingray-dashboard \
   --work-dir dash_data \
-  --default-dataset stingray \
+  --default-dataset DATASET_NAME \
   --host 127.0.0.1 \
   --port 8050
 ```
