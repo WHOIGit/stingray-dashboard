@@ -19,7 +19,7 @@ from .config import (
     URL_SYNCED_PARAMS,
     choose_default_dataset,
     get_unit,
-    meta_vars,
+    is_meta_var,
 )
 from .plot_utils import (
     dynamic_ticks,
@@ -344,7 +344,7 @@ def register_callbacks(app: dash.Dash) -> None:
             dfi = data.canonicalize_columns(dfi)
             data.SENSOR_VAR_CACHE[csv_path] = [
                 c for c in dfi.columns
-                if "_std" not in c and c not in meta_vars
+                if "_std" not in c and not is_meta_var(c)
             ]
             data.PROFILE_VAR_CACHE[csv_path] = [
                 c for c in data.SENSOR_VAR_CACHE[csv_path]
@@ -1812,17 +1812,29 @@ def register_callbacks(app: dash.Dash) -> None:
                         return f"{value:.4f}"
                     return f"{value:,.2f}"
                 return str(value)
-            media_1_label, media_1_link = make_media_link(row.get("media"), row.get("frame"))
-            media_2_label, media_2_link = make_media_link(row.get("media_2"), row.get("frame_2"))
+            media_streams = {}
+            for column in row:
+                match = re.fullmatch(r"media(?:_([1-9][0-9]*))?", column)
+                if not match:
+                    continue
+                stream_number = int(match.group(1) or 1)
+                if (
+                    stream_number == 1
+                    and column == "media_1"
+                    and stream_number in media_streams
+                ):
+                    continue
+                frame_column = "frame" if column == "media" else f"frame_{stream_number}"
+                label, href = make_media_link(row.get(column), row.get(frame_column))
+                if href:
+                    media_streams[stream_number] = (label, href)
             meta_cols = {
                 "point_id",
-                "media", "frame", "media_path", "id", "link",
-                "media_2", "frame_2", "media_path_2", "id_2", "link_2",
                 "times", "latitude", "longitude", "depth", "timestamp", "matdate",
             }
             variable_details = []
             for var, value in row.items():
-                if var in meta_cols or var.endswith("_std"):
+                if var in meta_cols or is_meta_var(var) or var.endswith("_std"):
                     continue
                 variable_details.append(
                     html.Div(
@@ -1881,8 +1893,15 @@ def register_callbacks(app: dash.Dash) -> None:
 
             return html.Div(
                 [
-                    image_block("📽️ ISIIS 1:", media_1_label, media_1_link, "isiis1"),
-                    image_block("📽️ ISIIS 2:", media_2_label, media_2_link, "isiis2"),
+                    *[
+                        image_block(
+                            f"📽️ Camera stream {stream_number}:",
+                            label,
+                            href,
+                            f"camera{stream_number}",
+                        )
+                        for stream_number, (label, href) in sorted(media_streams.items())
+                    ],
 
                     info_row("⏳ Time:", format_time(row.get("times"))),
                     info_row("🌍 Latitude:", format_number(row.get("latitude"), "°")),

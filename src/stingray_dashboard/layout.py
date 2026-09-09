@@ -14,7 +14,7 @@ from .config import (
     DEFAULT_SUBSAMPLE,
     DOWNLOADS_ENABLED,
     choose_default_dataset,
-    meta_vars,
+    is_meta_var,
 )
 
 
@@ -61,7 +61,7 @@ def make_layout() -> html.Div:
         df = pd.DataFrame()
     sensor_vars = [
         col for col in df.columns
-        if "_std" not in col and col not in meta_vars
+        if "_std" not in col and not is_meta_var(col)
     ] if not df.empty else []
     profile_vars = [
         col for col in sensor_vars

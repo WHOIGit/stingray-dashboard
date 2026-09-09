@@ -24,6 +24,7 @@ MAX_AVG_CACHE = 8
 
 stations: pd.DataFrame | None = None
 bathy: pd.DataFrame | None = None
+LEGACY_MEDIA_COLUMN_RE = re.compile(r"^(?:id|link|media_path)(?:_[1-9][0-9]*)?$")
 
 
 def get_link(media, frame):
@@ -63,6 +64,13 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+
+    legacy_media_columns = [
+        column for column in df.columns
+        if LEGACY_MEDIA_COLUMN_RE.fullmatch(str(column))
+    ]
+    if legacy_media_columns:
+        df.drop(columns=legacy_media_columns, inplace=True)
 
     # Instrument exports use 9999.99 as an invalid altitude sentinel. Replace
     # it before plotting or aggregation so it cannot distort scientific ranges.

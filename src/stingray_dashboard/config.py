@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 DEFAULT_SUBSAMPLE = None
 DEFAULT_MAX_TIME_GAP_SEC = 300  # 5 minutes; tune per platform
@@ -9,9 +10,14 @@ MAX_WORKERS = max(1, min(os.cpu_count() - 1, 8))
 meta_vars = [
     "timestamp", "times", "matdate",
     "latitude", "longitude", "depth",
-    "media", "media_path", "frame", "id", "link",
-    "media_2", "media_path_2", "frame_2", "id_2", "link_2"
+    "media", "frame", "media_1", "frame_1",
 ]
+
+MEDIA_VAR_RE = re.compile(r"^(?:media|frame)(?:_[1-9][0-9]*)?$")
+
+
+def is_meta_var(name: str) -> bool:
+    return name in meta_vars or bool(MEDIA_VAR_RE.fullmatch(name))
 
 DEFAULT_DATASET = os.getenv("STINGRAY_DEFAULT_DATASET", "")
 DOWNLOADS_ENABLED = (
