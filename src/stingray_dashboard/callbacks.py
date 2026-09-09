@@ -1813,7 +1813,7 @@ def register_callbacks(app: dash.Dash) -> None:
                     return f"{value:,.2f}"
                 return str(value)
             media_streams = {}
-            for column in row:
+            for column in row.index:
                 column = str(column)
                 match = re.fullmatch(r"media(?:_([1-9][0-9]*))?", column)
                 if not match:
