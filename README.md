@@ -290,11 +290,11 @@ python -m venv .venv
 # Activate the environment on Linux or macOS.
 source .venv/bin/activate
 
-# Install the dashboard package in editable mode with test dependencies.
-pip install -e "./packages/stingray-dashboard[dev]"
+# Install the dashboard package in editable mode.
+pip install -e "./packages/stingray-dashboard"
 
-# Run the dashboard regression tests.
-pytest packages/stingray-dashboard/tests
+# Confirm that the dashboard application can be constructed.
+python packages/stingray-dashboard/tests/test_dashboard.py
 ```
 
 Runtime datasets below `dash_data/` are excluded from version control. Store

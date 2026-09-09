@@ -63,6 +63,10 @@ def make_layout() -> html.Div:
         col for col in df.columns
         if "_std" not in col and col not in meta_vars
     ] if not df.empty else []
+    profile_vars = [
+        col for col in sensor_vars
+        if pd.api.types.is_numeric_dtype(df[col])
+    ]
     default_color_var = (
         "temperature"
         if "temperature" in sensor_vars
@@ -76,8 +80,8 @@ def make_layout() -> html.Div:
     )
     default_profile_var = (
         "temperature"
-        if "temperature" in sensor_vars
-        else (sensor_vars[0] if sensor_vars else None)
+        if "temperature" in profile_vars
+        else (profile_vars[0] if profile_vars else None)
     )
     sequential_maps = [
         name for name in px.colors.sequential.__dict__
@@ -408,7 +412,7 @@ def make_layout() -> html.Div:
                             dcc.Dropdown(
                                 id='profile_variable',
                                 options=[{'label': var.capitalize(), 'value': var}
-                                        for var in sensor_vars],
+                                        for var in profile_vars],
                                 value=default_profile_var
                             )
                         ], className='control-field'),

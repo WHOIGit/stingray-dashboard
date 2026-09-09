@@ -17,6 +17,7 @@ MISC_DIR = WORK_DIR / "misc"
 DATA_CACHE = {}
 CSV_HEADER_CACHE = {}
 SENSOR_VAR_CACHE = {}
+PROFILE_VAR_CACHE = {}
 MAX_DATA_CACHE = 8
 AVERAGE_CACHE = {}
 MAX_AVG_CACHE = 8
@@ -182,26 +183,24 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
         if n == 0:
             return df
         # -----------------------------------------------------
-        # Build segment IDs (deployment-aware if available)
+        # Build contiguous segments without crossing deployments, casts, or time gaps.
         # -----------------------------------------------------
-        if "deployment" in df.columns:
-            # Use precomputed deployment segmentation
-            seg = df["deployment"].to_numpy(np.int32)
-            new_segment = np.zeros(n, dtype=bool)
-            new_segment[0] = True
-            new_segment[1:] = seg[1:] != seg[:-1]
-        elif "times" in df.columns and not df["times"].isna().all():
-            # Fallback to time-gap segmentation
+        new_segment = np.zeros(n, dtype=bool)
+        new_segment[0] = True
+
+        for column in ("deployment", "cast"):
+            if column not in df.columns or df[column].isna().all():
+                continue
+            values = df[column]
+            previous = values.shift()
+            changed = values.isna().ne(previous.isna()) | values.ne(previous).fillna(False)
+            new_segment[1:] |= changed.iloc[1:].to_numpy(dtype=bool)
+
+        if "times" in df.columns and not df["times"].isna().all():
             dt = df["times"].diff().dt.total_seconds().to_numpy()
-            new_segment = np.zeros(n, dtype=bool)
-            new_segment[0] = True
-            new_segment[1:] = (dt[1:] > max_gap) | np.isnan(dt[1:])
-            seg = np.cumsum(new_segment)
-        else:
-            # No time and no deployment → treat entire dataset as one segment
-            seg = np.zeros(n, dtype=np.int32)
-            new_segment = np.zeros(n, dtype=bool)
-            new_segment[0] = True
+            new_segment[1:] |= (dt[1:] > max_gap) | np.isnan(dt[1:])
+
+        seg = np.cumsum(new_segment) - 1
         # -----------------------------------------------------
         # Compute index within each segment
         # -----------------------------------------------------

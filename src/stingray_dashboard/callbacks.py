@@ -289,6 +289,7 @@ def register_callbacks(app: dash.Dash) -> None:
             data.AVERAGE_CACHE.clear()
             data.CSV_HEADER_CACHE.clear()
             data.SENSOR_VAR_CACHE.clear()
+            data.PROFILE_VAR_CACHE.clear()
             data.load_csv.cache_clear()
         elif triggered == "dataset_selector":
             data.DATA_CACHE.clear()
@@ -335,20 +336,29 @@ def register_callbacks(app: dash.Dash) -> None:
         if not dataset or not csv_file:
             return [], None, [], None, [], None
         csv_path = data.DATA_DIR / dataset / f"{csv_file}.csv"
-        if csv_path not in data.SENSOR_VAR_CACHE:
+        if (
+            csv_path not in data.SENSOR_VAR_CACHE
+            or csv_path not in data.PROFILE_VAR_CACHE
+        ):
             dfi = pd.read_csv(csv_path, nrows=1000, low_memory=True)
             dfi = data.canonicalize_columns(dfi)
             data.SENSOR_VAR_CACHE[csv_path] = [
                 c for c in dfi.columns
                 if "_std" not in c and c not in meta_vars
             ]
+            data.PROFILE_VAR_CACHE[csv_path] = [
+                c for c in data.SENSOR_VAR_CACHE[csv_path]
+                if pd.api.types.is_numeric_dtype(dfi[c])
+            ]
         sensor_vars = data.SENSOR_VAR_CACHE[csv_path]
+        profile_vars = data.PROFILE_VAR_CACHE[csv_path]
         options = [{'label': v.capitalize(), 'value': v} for v in sensor_vars]
+        profile_options = [{'label': v.capitalize(), 'value': v} for v in profile_vars]
         default_color = "temperature" if "temperature" in sensor_vars else (sensor_vars[0] if sensor_vars else None)
         ts_candidates = [v for v in sensor_vars if v not in ['temperature', 'salinity']]
         ts_options = [{'label': v.capitalize(), 'value': v} for v in ts_candidates]
         default_ts = "chlorophyll" if "chlorophyll" in ts_candidates else (ts_candidates[0] if ts_candidates else None)
-        default_profile = "temperature" if "temperature" in sensor_vars else (sensor_vars[0] if sensor_vars else None)
+        default_profile = "temperature" if "temperature" in profile_vars else (profile_vars[0] if profile_vars else None)
         params = parse_qs(urlparse(search or "").query)
         url_color = params.get("variable", [None])[0]
         url_ts = params.get("tsvar", [None])[0]
@@ -365,13 +375,13 @@ def register_callbacks(app: dash.Dash) -> None:
             ts_val = current_ts_color
         else:
             ts_val = default_ts
-        if url_profile in sensor_vars:
+        if url_profile in profile_vars:
             profile_val = url_profile
-        elif current_profile_var in sensor_vars:
+        elif current_profile_var in profile_vars:
             profile_val = current_profile_var
         else:
             profile_val = default_profile
-        return options, color_val, ts_options, ts_val, options, profile_val
+        return options, color_val, ts_options, ts_val, profile_options, profile_val
 
     # --- Callback: Reset main plot color limits when color variable changes ---
     @app.callback(
@@ -1543,6 +1553,9 @@ def register_callbacks(app: dash.Dash) -> None:
                     font=dict(size=16, color="red"),
                 )
                 return fig
+        df = df.copy()
+        for col in set(required_cols):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.loc[
             np.isfinite(df["depth"]) &
             np.isfinite(df[color_var]) &
