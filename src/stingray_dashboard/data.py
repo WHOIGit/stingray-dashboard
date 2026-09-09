@@ -65,6 +65,15 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.copy()
 
+    # Normalize labels from imported data before applying regex-based matching.
+    # Some source formats can produce bytes or Timestamp column labels.
+    df.columns = [
+        column.decode("utf-8", errors="replace")
+        if isinstance(column, bytes)
+        else str(column).strip()
+        for column in df.columns
+    ]
+
     legacy_media_columns = [
         column for column in df.columns
         if LEGACY_MEDIA_COLUMN_RE.fullmatch(str(column))

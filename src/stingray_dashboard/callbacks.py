@@ -1814,6 +1814,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 return str(value)
             media_streams = {}
             for column in row:
+                column = str(column)
                 match = re.fullmatch(r"media(?:_([1-9][0-9]*))?", column)
                 if not match:
                     continue
@@ -1834,6 +1835,7 @@ def register_callbacks(app: dash.Dash) -> None:
             }
             variable_details = []
             for var, value in row.items():
+                var = str(var)
                 if var in meta_cols or is_meta_var(var) or var.endswith("_std"):
                     continue
                 variable_details.append(
