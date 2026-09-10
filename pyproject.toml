@@ -34,9 +34,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anhph95/stingraytools"
-Repository = "https://github.com/anhph95/stingraytools"
-Issues = "https://github.com/anhph95/stingraytools/issues"
+Homepage = "https://github.com/WHOIGit/stingray-dashboard"
+Repository = "https://github.com/WHOIGit/stingray-dashboard"
+Issues = "https://github.com/WHOIGit/stingray-dashboard/issues"
 
 [project.scripts]
 stingray-dashboard = "stingray_dashboard.app:main"

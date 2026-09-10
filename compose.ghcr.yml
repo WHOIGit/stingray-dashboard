@@ -1,0 +1,16 @@
+services:
+  app:
+    image: ${STINGRAY_DASHBOARD_IMAGE:-ghcr.io/whoigit/stingray-dashboard:3.0.0}
+    container_name: stingray-dashboard
+    ports:
+      - "${STINGRAY_DASHBOARD_PORT:-8050}:8050"
+    volumes:
+      - type: bind
+        source: ${DASH_DATA_DIR:-./dash_data}
+        target: /dash_data
+        read_only: true
+    environment:
+      PYTHONUNBUFFERED: "1"
+      STINGRAY_DASHBOARD_PORT: "${STINGRAY_DASHBOARD_PORT:-8050}"
+      STINGRAY_DEFAULT_DATASET: "${STINGRAY_DEFAULT_DATASET:-}"
+    restart: unless-stopped

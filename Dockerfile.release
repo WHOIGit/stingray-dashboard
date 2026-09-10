@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+COPY . /app/
+RUN chmod +x /app/docker-entrypoint.sh \
+    && pip install --upgrade pip \
+    && pip install --no-cache-dir ".[server]"
+
+EXPOSE 8050
+CMD ["/app/docker-entrypoint.sh"]
