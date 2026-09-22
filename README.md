@@ -1,5 +1,7 @@
 # stingray-dashboard
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15025962.svg)](https://doi.org/10.5281/zenodo.15025962)
+
 Installable Dash application for interactive exploration of NES-LTER Stingray
 dashboard data.
 
@@ -15,7 +17,7 @@ Run these commands from the directory that contains `dash_data/`.
 Unix shell:
 
 ```bash
-curl -O https://raw.githubusercontent.com/anhph95/stingray-dashboard/main/compose.ghcr.yml
+ curl -O https://raw.githubusercontent.com/WHOIGit/stingray-dashboard/main/compose.ghcr.yml
 docker compose -f compose.ghcr.yml pull
 docker compose -f compose.ghcr.yml up -d --pull always
 ```
@@ -24,7 +26,7 @@ Windows PowerShell:
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/anhph95/stingray-dashboard/main/compose.ghcr.yml" `
+   -Uri "https://raw.githubusercontent.com/WHOIGit/stingray-dashboard/main/compose.ghcr.yml" `
   -OutFile "compose.ghcr.yml"
 
 docker compose -f compose.ghcr.yml pull
@@ -35,7 +37,7 @@ Open `http://127.0.0.1:8050`. Leave `STINGRAY_DEFAULT_DATASET` unset to open
 the first dataset folder under `dash_data/data/`. Set
 `STINGRAY_DASHBOARD_PORT=8051` when host port `8050` is unavailable.
 
-The default Compose image is `ghcr.io/anhph95/stingray-dashboard:3.0.0`.
+ The default Compose image is `ghcr.io/WHOIGit/stingray-dashboard:3.1.0`.
 
 ## Data layout
 
@@ -143,9 +145,9 @@ dataset files does not require rebuilding the image.
 
 ## Run the released image directly
 
-GitHub Actions builds `ghcr.io/anhph95/stingray-dashboard` from repository
-source after every push to `main`. The `v3.0.0` Git tag publishes versioned
-`3.0.0` and `3.0` image tags.
+ GitHub Actions builds `ghcr.io/WHOIGit/stingray-dashboard` from repository
+source after every push to `main`. The `v3.1.0` Git tag publishes versioned
+`3.1.0` and `3.1` image tags.
 
 Run these commands from the directory that contains `dash_data/`:
 
@@ -156,7 +158,7 @@ docker run -d \
   -p 8050:8050 \
   -e STINGRAY_DASHBOARD_PORT=8050 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  ghcr.io/anhph95/stingray-dashboard:3.0.0
+   ghcr.io/WHOIGit/stingray-dashboard:3.1.0
 ```
 
 If host port `8050` is already in use, choose another host port without
@@ -169,7 +171,7 @@ docker run -d \
   -p 8051:8050 \
   -e STINGRAY_DASHBOARD_PORT=8051 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  ghcr.io/anhph95/stingray-dashboard:3.0.0
+   ghcr.io/WHOIGit/stingray-dashboard:3.1.0
 ```
 
 Stop and remove the container with:
@@ -218,7 +220,7 @@ Build the checked-out dashboard source from the repository root:
 
 ```bash
 # Clone and enter the source repository.
-git clone https://github.com/anhph95/stingray-dashboard.git
+ git clone https://github.com/WHOIGit/stingray-dashboard.git
 cd stingray-dashboard
 
 # Build the dashboard package and assets from the current working tree.
@@ -244,14 +246,14 @@ Install the dashboard directly from Git:
 
 ```bash
 # Install the dashboard package from the Git repository.
-pip install "stingray-dashboard @ git+https://github.com/anhph95/stingray-dashboard.git"
+ pip install "stingray-dashboard @ git+https://github.com/WHOIGit/stingray-dashboard.git"
 ```
 
 For a Linux server deployment with Gunicorn:
 
 ```bash
 # Install the dashboard package with server runtime dependencies.
-pip install "stingray-dashboard[server] @ git+https://github.com/anhph95/stingray-dashboard.git"
+ pip install "stingray-dashboard[server] @ git+https://github.com/WHOIGit/stingray-dashboard.git"
 ```
 
 Start the installed application with an explicit work directory:
@@ -301,14 +303,10 @@ Runtime datasets below `dash_data/` are excluded from version control. Store
 large or institution-specific CSV files in the local workspace. Commit source
 code, packaged reference tables, and tests.
 
-## Container release process
+## Citation
 
-Maintainers do not build or upload release images manually:
+Please cite this software as:
 
-1. Push to `main` to publish `latest` and a commit-specific `sha-*` tag.
-2. Create and push a version tag such as `v3.0.0` to publish `3.0.0` and `3.0`.
-3. Make the container package public in the repository Packages settings so users can pull it without registry authentication.
+> Pham, Anh H. *Stingray Dashboard*, version 3.1.0. Zenodo. https://doi.org/10.5281/zenodo.15025962
 
-The commit-specific tag provides an immutable deployment identity, a semantic
-version identifies a supported release, and `latest` tracks the current
-production branch.
+Machine-readable citation metadata is available in [CITATION.cff](CITATION.cff).

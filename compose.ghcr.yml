@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${STINGRAY_DASHBOARD_IMAGE:-ghcr.io/anhph95/stingray-dashboard:3.0.0}
+    image: ${STINGRAY_DASHBOARD_IMAGE:-ghcr.io/WHOIGit/stingray-dashboard:3.1.0}
     container_name: stingray-dashboard
     ports:
       - "${STINGRAY_DASHBOARD_PORT:-8050}:8050"

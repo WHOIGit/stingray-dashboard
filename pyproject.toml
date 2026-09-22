@@ -4,15 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stingray-dashboard"
-version = "3.0.0"
+version = "3.1.0"
 description = "Installable Dash application for the NES-LTER Stingray dashboard"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "Anh Pham" },
-    { name = "Sidney Batchelder" },
-    { name = "Heidi Sosik" },
+    { name = "Anh H. Pham" },
 ]
 keywords = [
     "NES-LTER",
@@ -34,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anhph95/stingray-dashboard"
-Repository = "https://github.com/anhph95/stingray-dashboard"
-Issues = "https://github.com/anhph95/stingray-dashboard/issues"
+Homepage = "https://github.com/WHOIGit/stingray-dashboard"
+Repository = "https://github.com/WHOIGit/stingray-dashboard"
+Issues = "https://github.com/WHOIGit/stingray-dashboard/issues"
 
 [project.scripts]
 stingray-dashboard = "stingray_dashboard.app:main"

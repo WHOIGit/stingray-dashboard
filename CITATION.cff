@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use Stingray Dashboard, please cite it using this file."
+title: "Stingray Dashboard"
+type: software
+version: "3.1.0"
+authors:
+  - family-names: Pham
+    given-names: Anh H.
+repository-code: "https://github.com/WHOIGit/stingray-dashboard"
+license: MIT
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.15025962"
+    description: "Zenodo record for the Stingray Dashboard"
+keywords:
+  - NES-LTER
+  - oceanography
+  - dashboard
+  - Stingray
