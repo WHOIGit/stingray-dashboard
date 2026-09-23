@@ -1,312 +1,100 @@
-# stingray-dashboard
+# Stingray Dashboard
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15025962.svg)](https://doi.org/10.5281/zenodo.15025962)
-
-Installable Dash application for interactive exploration of NES-LTER Stingray
-dashboard data.
-
-## Run the released image with Compose
-
-This is the recommended deployment path. Docker pulls the released dashboard
-image from GitHub Container Registry, so neither a source checkout nor a local
-image build is required. The container reads dashboard-ready files from the
-host workspace and never modifies them.
-
-Run these commands from the directory that contains `dash_data/`.
-
-Unix shell:
-
-```bash
- curl -O https://raw.githubusercontent.com/WHOIGit/stingray-dashboard/main/compose.ghcr.yml
-docker compose -f compose.ghcr.yml pull
-docker compose -f compose.ghcr.yml up -d --pull always
-```
-
-Windows PowerShell:
-
-```powershell
-Invoke-WebRequest `
-   -Uri "https://raw.githubusercontent.com/WHOIGit/stingray-dashboard/main/compose.ghcr.yml" `
-  -OutFile "compose.ghcr.yml"
-
-docker compose -f compose.ghcr.yml pull
-docker compose -f compose.ghcr.yml up -d --pull always
-```
-
-Open `http://127.0.0.1:8050`. Leave `STINGRAY_DEFAULT_DATASET` unset to open
-the first dataset folder under `dash_data/data/`. Set
-`STINGRAY_DASHBOARD_PORT=8051` when host port `8050` is unavailable.
-
- The default Compose image is `ghcr.io/WHOIGit/stingray-dashboard:3.1.0`.
+Stingray Dashboard is a read-only Dash application for exploring dashboard-ready
+Stingray CSV products.
 
 ## Data layout
 
-The dashboard reads CSV data from a work directory. By default, it uses
-`/dash_data` when that directory exists and otherwise uses `./dash_data`.
+The application reads `/dash_data` when that directory exists; otherwise it
+reads `./dash_data`.
 
 ```text
 dash_data/
   data/
-    <dataset_name>/
-      *.csv
+    <platform_project>/
+      <cruise>.csv
   misc/
     NESLTER_station_list.csv
     NESLTER_transect_bathymetry.csv
 ```
 
-Dataset folders below `data/` appear in the dataset selector. CSV files inside
-the selected folder appear in the data-file selector:
+Dataset folders appear in the dataset selector. CSV files within the selected
+folder appear in the file selector. The application never modifies the data
+directory.
 
-```text
-dash_data/data/DATASET_NAME/DATA_FILE.csv
-```
-
-By default, the dashboard opens the first dataset folder found under `data/`.
-Set `--default-dataset` for the Python command or `STINGRAY_DEFAULT_DATASET` for
-Docker and Compose deployments when a server should open a specific dataset.
-If the requested dataset is absent, the dashboard falls back to the first
-available folder so startup still succeeds.
-
-The station and bathymetry tables are shipped with the package. An optional
-`misc/` directory is needed only when a workspace provides replacement tables.
-
-### CSV variables
-
-The dashboard works best when each CSV contains:
-
-- `times`, `latitude`, `longitude`, and `depth` for navigation and transect plots.
-- `temperature` and `salinity` for the T-S diagram and density contours.
-- `cast` for individual vertical profiles.
-- Numeric sensor variables such as `chlorophyll`, `nitrate`, `par`, or `oxygen_concentration`.
-- Optional `media` and `frame` columns for linked imagery.
-
-When `media` and `frame` are present, the dashboard can build frame-viewer
-links for selected observations. Those links are intended for a compatible
-Stingray frame service such as
-[WHOIGit/stingray-frame-viewer](https://github.com/WHOIGit/stingray-frame-viewer),
-which serves individual Stingray video frames to browsers.
-
+CSV files work best with `times`, `latitude`, `longitude`, and `depth`. Sensor
+variables, `cast`, and optional `media` and `frame` columns are supported.
 Common source names such as `lat`, `lon`, `t090`, `sal00`, and `pressure` are
-normalized to canonical dashboard columns. Instrument-altitude sentinel values
-equal to `9999.99` are treated as missing data so they do not distort plot
-ranges or averages.
+normalized automatically. Altitude values equal to `9999.99` are treated as
+missing.
 
-## Dashboard controls
+Station and bathymetry tables are bundled with the package. Files in
+`dash_data/misc/` override the bundled tables when present.
 
-- Use the top row to select dataset, CSV file, sampling mode, point size, opacity, font size, and refresh the file list.
-- `Subsample` keeps every \(N\)-th observation and preserves the original point identifiers.
-- `Average bins` computes means within cast- or deployment-aware groups of \(N\) observations.
-- Short trailing average bins are discarded rather than combined across casts or time gaps.
-- Each plot has its own option panel beside it.
-- Plot dimensions are controlled by width and height inputs in each plot option panel.
-- The URL query string stores the dashboard state for reproducible shared views.
-- Cruise-track selections filter the main transect, T-S, and profile plots.
-- Main plot selections synchronize with the T-S and profile plots.
-- Cast coloring uses a continuous color scale to avoid creating one trace per cast.
-- Multi-cast profile plots use WebGL traces for smoother rendering.
+## Run with Compose
 
-## Gunicorn deployment
-
-The installable WSGI target is:
-
-```text
-stingray_dashboard.app:application
-```
-
-Run it with Gunicorn:
+From the directory containing `dash_data/`:
 
 ```bash
-gunicorn --bind 0.0.0.0:8050 stingray_dashboard.app:application
-```
-
-For a container or server deployment, mount the dashboard workspace at
-`/dash_data`:
-
-```yaml
-volumes:
-  - /path/to/dashboard_data:/dash_data:ro
-```
-
-## Docker data requirements
-
-The container treats `/dash_data` strictly as read-only input and never creates
-files or directories there. A workspace normally contains only dataset files:
-
-```text
-dash_data/
-  data/
-    <dataset_name>/
-      *.csv
-```
-
-The packaged station and bathymetry tables are used automatically. Add
-`dash_data/misc/` only when supplying workspace-specific replacements. Changing
-dataset files does not require rebuilding the image.
-
-## Run the released image directly
-
- GitHub Actions builds `ghcr.io/WHOIGit/stingray-dashboard` from repository
-source after every push to `main`. The `v3.1.0` Git tag publishes versioned
-`3.1.0` and `3.1` image tags.
-
-Run these commands from the directory that contains `dash_data/`:
-
-```bash
-docker run -d \
-  --name stingray-dashboard \
-  --restart unless-stopped \
-  -p 8050:8050 \
-  -e STINGRAY_DASHBOARD_PORT=8050 \
-  -v "$(pwd)/dash_data:/dash_data:ro" \
-   ghcr.io/WHOIGit/stingray-dashboard:3.1.0
-```
-
-If host port `8050` is already in use, choose another host port without
-rebuilding the image:
-
-```bash
-docker run -d \
-  --name stingray-dashboard \
-  --restart unless-stopped \
-  -p 8051:8050 \
-  -e STINGRAY_DASHBOARD_PORT=8051 \
-  -v "$(pwd)/dash_data:/dash_data:ro" \
-   ghcr.io/WHOIGit/stingray-dashboard:3.1.0
-```
-
-Stop and remove the container with:
-
-```bash
-# Remove the application container without touching the bind-mounted host data.
-docker rm -f stingray-dashboard
-```
-
-## Compose operations
-
-The first section contains the complete recommended Compose installation.
-These commands cover routine release updates and deployment customization.
-
-Update the application while preserving the mounted datasets:
-
-```bash
+curl -O https://raw.githubusercontent.com/WHOIGit/stingray-dashboard/main/compose.ghcr.yml
 docker compose -f compose.ghcr.yml pull
 docker compose -f compose.ghcr.yml up -d --pull always
 ```
 
-Run on host port `8051`:
+Open [http://127.0.0.1:8050](http://127.0.0.1:8050). Set
+`STINGRAY_DASHBOARD_PORT` when the host port is unavailable. Set
+`STINGRAY_DEFAULT_DATASET` to choose the initial dataset folder.
+
+## Run the released image
 
 ```bash
-STINGRAY_DASHBOARD_PORT=8051 docker compose -f compose.ghcr.yml up -d --pull always
-```
-
-Open a named dataset folder by default when multiple dataset folders exist:
-
-```bash
-STINGRAY_DEFAULT_DATASET=DATASET_NAME docker compose -f compose.ghcr.yml up -d --pull always
-```
-
-Leave `STINGRAY_DEFAULT_DATASET` unset to open the first available dataset
-folder under `/dash_data/data`.
-
-Stop the Compose deployment:
-
-```bash
-docker compose -f compose.ghcr.yml down
-```
-
-## Build from a local checkout
-
-Build the checked-out dashboard source from the repository root:
-
-```bash
-# Clone and enter the source repository.
- git clone https://github.com/WHOIGit/stingray-dashboard.git
-cd stingray-dashboard
-
-# Build the dashboard package and assets from the current working tree.
-docker build -f Dockerfile.release -t stingray-dashboard:local .
-
-# Run the resulting image from the workspace containing dash_data/.
 docker run -d \
   --name stingray-dashboard \
   --restart unless-stopped \
   -p 8050:8050 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  stingray-dashboard:local
+  ghcr.io/WHOIGit/stingray-dashboard:3.1.0
 ```
 
-Rebuild after changing application source, assets, dependencies, or Docker
-configuration.
-
-## Python installation
-
-Use the Python package workflow only when running without Docker.
-
-Install the dashboard directly from Git:
+## Run from Python
 
 ```bash
-# Install the dashboard package from the Git repository.
- pip install "stingray-dashboard @ git+https://github.com/WHOIGit/stingray-dashboard.git"
-```
-
-For a Linux server deployment with Gunicorn:
-
-```bash
-# Install the dashboard package with server runtime dependencies.
- pip install "stingray-dashboard[server] @ git+https://github.com/WHOIGit/stingray-dashboard.git"
-```
-
-Start the installed application with an explicit work directory:
-
-```bash
-# Run the installed command against the local dashboard workspace.
+pip install "stingray-dashboard @ git+https://github.com/WHOIGit/stingray-dashboard.git"
 stingray-dashboard --work-dir dash_data --host 0.0.0.0 --port 8050
 ```
 
-Select the initial dataset explicitly when checking processed output:
+For Gunicorn deployments:
 
 ```bash
-# Open the named dataset first, even if other dataset folders exist.
-stingray-dashboard \
-  --work-dir dash_data \
-  --default-dataset DATASET_NAME \
-  --host 127.0.0.1 \
-  --port 8050
+pip install "stingray-dashboard[server] @ git+https://github.com/WHOIGit/stingray-dashboard.git"
+gunicorn --bind 0.0.0.0:8050 stingray_dashboard.app:application
 ```
 
-Display all command-line options:
+## Dashboard controls
+
+The dashboard supports dataset and CSV selection, subsampling or averaging,
+plot-variable selection, plot sizing, linked cruise-track filtering, and
+download of the selected CSV. The URL stores dashboard state for reproducible
+views.
+
+When `media` and `frame` columns are present, selected observations can link to
+a compatible frame service such as
+[stingray-frame-viewer](https://github.com/WHOIGit/stingray-frame-viewer).
+
+## Development
 
 ```bash
-# Show available command-line flags and defaults.
-stingray-dashboard --help
-```
-
-## Development and tests
-
-Run these commands from the repository root:
-
-```bash
-# Create an isolated project-local Python environment.
 python -m venv .venv
-
-# Activate the environment on Linux or macOS.
 source .venv/bin/activate
-
-# Install the dashboard package in editable mode.
 pip install -e "."
-
-# Confirm that the dashboard application can be constructed.
 python tests/test_dashboard.py
 ```
 
-Runtime datasets below `dash_data/` are excluded from version control. Store
-large or institution-specific CSV files in the local workspace. Commit source
-code, packaged reference tables, and tests.
+Runtime data under `dash_data/` is excluded from version control. Keep source
+code, tests, and packaged reference tables in the repository.
 
-## Citation
+## License and citation
 
-Please cite this software as:
+Stingray Dashboard is distributed under the MIT License. See [LICENSE](LICENSE).
 
-> Pham, Anh H. *Stingray Dashboard*, version 3.1.0. Zenodo. https://doi.org/10.5281/zenodo.15025962
-
-Machine-readable citation metadata is available in [CITATION.cff](CITATION.cff).
+Please cite [CITATION.cff](CITATION.cff).
