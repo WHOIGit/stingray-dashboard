@@ -180,7 +180,7 @@ button {
 /* Section titles */
 .section-label {
   font-weight: bold;
-  font-size: 16px;
+  font-size: 18px;
   color: #183554;
   margin-bottom: 6px;
 }
@@ -286,7 +286,7 @@ select {
 }
 
 .global-panel label {
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -419,6 +419,28 @@ select {
   box-sizing: border-box;
 }
 
+/* Keep the details card alongside both the transect and T-S plots. */
+.analysis-section {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+}
+
+.analysis-stack {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.analysis-details {
+  flex: 0 0 360px;
+  min-width: 360px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
 .plot-controls {
   flex: 0 0 240px;
   min-width: 240px;
@@ -490,7 +512,7 @@ select {
 
 /* Right panel titles */
 .right-panel .section-label {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: bold;
   margin-bottom: 4px;
 }
@@ -504,7 +526,8 @@ select {
 
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 
-  max-height: 760px;        /* prevent panel overflow */
+  flex: 1 1 auto;
+  max-height: none;
   overflow-y: auto;
 }
 
@@ -527,7 +550,8 @@ select {
   }
 
   .right-slot,
-  .right-panel {
+  .right-panel,
+  .analysis-details {
     flex: 0 0 300px;
     min-width: 300px;
     max-width: 300px;
@@ -559,7 +583,9 @@ select {
 
   .plot-workspace,
   .right-slot,
-  .right-panel {
+  .right-panel,
+  .analysis-section,
+  .analysis-details {
     width: 100%;
     max-width: 100%;
     min-width: 100%;
@@ -568,6 +594,11 @@ select {
   .plot-row {
     flex-direction: column;
   }
+
+  .analysis-section {
+    display: block;
+  }
+
 
   .plot-controls,
   .dataset-panel,

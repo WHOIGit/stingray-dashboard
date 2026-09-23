@@ -111,6 +111,16 @@ def register_callbacks(app: dash.Dash) -> None:
     app.clientside_callback(
         """
         function(figure) {
+            function pointIdValue(value) {
+                if (value == null) {
+                    return null;
+                }
+                if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+                    return value.length ? value[0] : null;
+                }
+                return value;
+            }
+
             if (!figure || !figure.data) {
                 return [];
             }
@@ -118,8 +128,8 @@ def register_callbacks(app: dash.Dash) -> None:
                 if (!trace.customdata) {
                     return [];
                 }
-                return trace.customdata.map(function(value) {
-                    return Array.isArray(value) ? value[0] : value;
+                return Array.from(trace.customdata, function(value) {
+                    return pointIdValue(value);
                 });
             });
         }
@@ -131,6 +141,16 @@ def register_callbacks(app: dash.Dash) -> None:
     app.clientside_callback(
         """
         function(figure) {
+            function pointIdValue(value) {
+                if (value == null) {
+                    return null;
+                }
+                if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+                    return value.length ? value[0] : null;
+                }
+                return value;
+            }
+
             if (!figure || !figure.data) {
                 return [];
             }
@@ -138,8 +158,8 @@ def register_callbacks(app: dash.Dash) -> None:
                 if (!trace.customdata) {
                     return [];
                 }
-                return trace.customdata.map(function(value) {
-                    return Array.isArray(value) ? value[0] : value;
+                return Array.from(trace.customdata, function(value) {
+                    return pointIdValue(value);
                 });
             });
         }
@@ -480,7 +500,7 @@ def register_callbacks(app: dash.Dash) -> None:
             mode="markers",
             marker=dict(size=5, color="blue"),
             meta=df["point_id"].astype(int).tolist(),
-            customdata=df["point_id"].astype(int).to_numpy().reshape(-1, 1)
+            customdata=df["point_id"].astype(int).to_numpy().reshape(-1, 1).tolist()
         ))
         fig.update_traces(
             mode="markers",
@@ -856,7 +876,7 @@ def register_callbacks(app: dash.Dash) -> None:
                         cmax=vmax,
                         coloraxis="coloraxis"
                     ),
-                    customdata=df["point_id"].astype(np.int32).to_numpy(),
+                    customdata=df["point_id"].astype(np.int32).to_numpy().tolist(),
                     hovertemplate=(
                         f"{x_axis.capitalize()}: %{{x:.2f}}<br>"
                         f"{y_axis.capitalize()}: %{{y:.2f}}<br>"
@@ -898,7 +918,7 @@ def register_callbacks(app: dash.Dash) -> None:
                             customdata=np.c_[
                                 g["point_id"].astype(np.int32).to_numpy(),
                                 g[color_var].to_numpy()
-                            ],
+                            ].tolist(),
                             name=str(class_value),
                             hovertemplate=(
                                 f"{x_axis.capitalize()}: %{{x}}<br>"
@@ -936,7 +956,7 @@ def register_callbacks(app: dash.Dash) -> None:
                         customdata=np.c_[
                             df["point_id"].astype(np.int32).to_numpy(),
                             df[color_var].to_numpy()
-                        ],
+                        ].tolist(),
                         hovertemplate=(
                             f"{x_axis.capitalize()}: %{{x}}<br>"
                             f"{y_axis.capitalize()}: %{{y}}<br>"
@@ -1293,7 +1313,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 vmin = q[0.05] if vmin is None else vmin
                 vmax = q[0.95] if vmax is None else vmax
             marker_color = numeric_color
-            customdata = df["point_id"].astype(np.int32).to_numpy()
+            customdata = df["point_id"].astype(np.int32).to_numpy().tolist()
             hovertemplate = (
                 "Salinity: %{x:.2f}<br>"
                 "Temperature: %{y:.2f} °C<br>"
@@ -1330,7 +1350,7 @@ def register_callbacks(app: dash.Dash) -> None:
             customdata = np.c_[
                 df["point_id"].astype(np.int32).to_numpy(),
                 labels.to_numpy(),
-            ]
+            ].tolist()
             hovertemplate = (
                 "Salinity: %{x:.2f}<br>"
                 "Temperature: %{y:.2f} °C<br>"

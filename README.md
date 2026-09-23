@@ -53,7 +53,7 @@ docker run -d \
   --restart unless-stopped \
   -p 8050:8050 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  ghcr.io/WHOIGit/stingray-dashboard:3.1.0
+  ghcr.io/WHOIGit/stingray-dashboard:3.2.0
 ```
 
 ## Run from Python

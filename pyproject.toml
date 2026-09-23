@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stingray-dashboard"
-version = "3.1.0"
+version = "3.2.0"
 description = "Installable Dash application for the NES-LTER Stingray dashboard"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,10 +25,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "dash>=3.2,<4",
+    "dash>=4.2,<5",
     "numpy>=1.26",
     "pandas>=2.0",
-    "plotly>=5.24,<6",
+    "plotly>=7,<8",
 ]
 
 [project.urls]

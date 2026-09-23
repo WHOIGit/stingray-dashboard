@@ -126,6 +126,7 @@ def make_layout() -> html.Div:
         html.Div([
             html.Div([
                 html.Div([
+                html.Div([
                     html.Div([
                         html.Label('Dataset:'),
                         dcc.Dropdown(
@@ -219,8 +220,7 @@ def make_layout() -> html.Div:
         html.Div([
             html.Div([
                 html.Div([
-                    html.Div([
-                        html.Label('CRUISE TRACK', className='section-label'),
+                    html.Label('CRUISE TRACK', className='section-label'),
                         html.Div([
                             html.Label('X-axis:'),
                             dcc.Dropdown(
@@ -245,16 +245,18 @@ def make_layout() -> html.Div:
                             html.Label('Track H:'),
                             dcc.Input(id='track_height', type='number', value=320, debounce=True)
                         ], className='control-field'),
-                    ], className='panel plot-controls'),
+                ], className='panel plot-controls'),
                     html.Div([
                         dcc.Graph(
                             id='cruise_track',
                             responsive=True,
                             style={"width": "100%", "height": "100%"}
                         )
-                    ], id='track_container', className='cruise-track-graph plot-area'),
-                    html.Div(className='right-slot'),
-                ], className='plot-row'),
+                ], id='track_container', className='cruise-track-graph plot-area'),
+                html.Div(className='right-slot'),
+            ], className='plot-row'),
+            html.Div([
+                html.Div([
                 html.Div([
                     html.Div([
                         html.Label('TRANSECT PLOT', className='section-label'),
@@ -350,13 +352,6 @@ def make_layout() -> html.Div:
                             style={"width": "100%", "height": "100%"}
                         )
                     ], id='main_container', className='main-graph plot-area'),
-                    html.Div([
-                        html.Label('Details:', className='section-label', style={'font-size': '16px'}),
-                        html.Div(id='click-output', className='card', style={
-                            'font-size': '13px',
-                            'line-height': '1.4em'
-                        }),
-                    ], className='right-panel right-slot'),
                 ], className='plot-row'),
                 html.Div([
                     html.Div([
@@ -402,8 +397,16 @@ def make_layout() -> html.Div:
                             style={"width": "100%", "height": "100%"}
                         )
                     ], id='ts_container', className='ts-graph plot-area'),
-                    html.Div(className='right-slot'),
                 ], className='plot-row'),
+            ], className='analysis-stack'),
+            html.Div([
+                html.Label('Details:', className='section-label'),
+                html.Div(id='click-output', className='card', style={
+                    'font-size': '13px',
+                    'line-height': '1.4em'
+                }),
+            ], className='analysis-details right-panel'),
+        ], className='analysis-section'),
                 html.Div([
                     html.Div([
                         html.Label('PROFILE PLOT', className='section-label'),
