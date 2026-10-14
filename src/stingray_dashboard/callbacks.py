@@ -78,6 +78,22 @@ def _is_present(value: str | None) -> bool:
 def _clean_log_value(value: str) -> str:
     return " ".join(value.strip().split())
 
+def _get_cruise_track_selection_ids(selected_data):
+    """Return stable cruise-track point IDs from a Plotly selection event."""
+    if not selected_data or not selected_data.get("points"):
+        return []
+
+    selected_ids = []
+    for point in selected_data["points"]:
+        point_id = get_point_id_from_event_point(point)
+        if point_id is None:
+            # Keep compatibility with the cruise-track trace's trace-level
+            # meta payload for Plotly event payloads that omit customdata.
+            point_id = point.get("meta")
+        if point_id is not None:
+            selected_ids.append(int(point_id))
+    return selected_ids
+
 def _log_csv_download(
     dataset: str,
     csv_file: str,
@@ -167,6 +183,61 @@ def register_callbacks(app: dash.Dash) -> None:
         Output("ts_plot_point_ids", "data"),
         Input("ts_plot", "figure"),
     )
+
+    def _plot_export_config(dataset, csv_file, plot_type, *parts):
+        """Build a safe Plotly image-export filename from the active plot settings."""
+        components = [dataset, csv_file, plot_type, *parts]
+        filename = "_".join(
+            re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("_")
+            for value in components
+            if value
+        )
+        return {"toImageButtonOptions": {"filename": filename or "stingray_plot"}}
+
+
+    @app.callback(
+        Output("cruise_track", "config"),
+        Input("dataset_selector", "value"),
+        Input("csv_selector", "value"),
+        Input("cruise_track_xaxis", "value"),
+        Input("cruise_track_yaxis", "value"),
+    )
+    def update_cruise_track_export_config(dataset, csv_file, xaxis, yaxis):
+        return _plot_export_config(dataset, csv_file, "cruise_track", xaxis, yaxis)
+
+
+    @app.callback(
+        Output("main_plot", "config"),
+        Input("dataset_selector", "value"),
+        Input("csv_selector", "value"),
+        Input("x_axis_variable", "value"),
+        Input("y_axis_variable", "value"),
+        Input("color_variable", "value"),
+    )
+    def update_main_plot_export_config(dataset, csv_file, xaxis, yaxis, color_var):
+        return _plot_export_config(dataset, csv_file, "transect", xaxis, yaxis, color_var)
+
+
+    @app.callback(
+        Output("ts_plot", "config"),
+        Input("dataset_selector", "value"),
+        Input("csv_selector", "value"),
+        Input("ts_color_variable", "value"),
+    )
+    def update_ts_plot_export_config(dataset, csv_file, color_var):
+        return _plot_export_config(
+            dataset, csv_file, "ts_temperature-salinity", color_var
+        )
+
+
+    @app.callback(
+        Output("profile_plot", "config"),
+        Input("dataset_selector", "value"),
+        Input("csv_selector", "value"),
+        Input("profile_variable", "value"),
+    )
+    def update_profile_plot_export_config(dataset, csv_file, variable):
+        return _plot_export_config(dataset, csv_file, "profile", variable)
 
     @app.callback(
         Output('download-confirm-button', 'disabled'),
@@ -563,12 +634,8 @@ def register_callbacks(app: dash.Dash) -> None:
             return {"mode": "all", "selected_ids": None, "_key": this_key}
 
         if trigger == "cruise_track":
-            if selectedData and selectedData.get("points"):
-                ids = [
-                    int(p["meta"])
-                    for p in selectedData["points"]
-                    if p.get("meta") is not None
-                ]
+            ids = _get_cruise_track_selection_ids(selectedData)
+            if ids:
                 return {"mode": "ids", "selected_ids": ids, "_key": this_key}
 
             # Clearing the cruise-track selection restores all observations:

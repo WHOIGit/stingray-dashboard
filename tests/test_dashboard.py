@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from stingray_dashboard.app import create_app
+from stingray_dashboard.callbacks import _get_cruise_track_selection_ids
 from stingray_dashboard.data import canonicalize_columns
 from stingray_dashboard.plot_utils import get_point_id_from_event_point
 
@@ -24,6 +25,17 @@ def test_selection_id_falls_back_to_trace_point_ids() -> None:
     trace_point_ids = [[10, 11], [20, 21, 22]]
 
     assert get_point_id_from_event_point(event_point, trace_point_ids) == 22
+
+
+def test_cruise_track_selection_uses_stable_point_ids() -> None:
+    selected = {
+        "points": [
+            {"customdata": [12], "pointNumber": 4},
+            {"meta": 27, "pointNumber": 9},
+        ]
+    }
+
+    assert _get_cruise_track_selection_ids(selected) == [12, 27]
 
 
 def main() -> None:

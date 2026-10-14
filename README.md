@@ -53,7 +53,7 @@ docker run -d \
   --restart unless-stopped \
   -p 8050:8050 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
-  ghcr.io/WHOIGit/stingray-dashboard:3.2.0
+  ghcr.io/WHOIGit/stingray-dashboard:3.2.1
 ```
 
 ## Run from Python
@@ -96,5 +96,11 @@ code, tests, and packaged reference tables in the repository.
 ## License and citation
 
 Stingray Dashboard is distributed under the MIT License. See [LICENSE](LICENSE).
+
+The MIT License covers the source code only. The logos in
+`src/stingray_dashboard/assets/` belong to WHOI, NES-LTER and the LTER Network
+and are not licensed for reuse. The bundled reference tables in
+`src/stingray_dashboard/data_reference/` keep the terms of their original
+sources; cite those sources when reusing them.
 
 Please cite [CITATION.cff](CITATION.cff).
