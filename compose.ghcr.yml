@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${STINGRAY_DASHBOARD_IMAGE:-ghcr.io/WHOIGit/stingray-dashboard:3.2.1}
+    image: ${STINGRAY_DASHBOARD_IMAGE:-ghcr.io/whoigit/stingray-dashboard:3.3.0}
     container_name: stingray-dashboard
     ports:
       - "${STINGRAY_DASHBOARD_PORT:-8050}:8050"
@@ -11,6 +11,9 @@ services:
         read_only: true
     environment:
       PYTHONUNBUFFERED: "1"
+      # 2 processes x 4 threads; threads share each process's data cache.
+      # Use "--workers 1 --threads 8" on small servers to keep memory low.
+      GUNICORN_CMD_ARGS: "${GUNICORN_CMD_ARGS:---worker-class gthread --workers 2 --threads 4 --timeout 120}"
       STINGRAY_DASHBOARD_PORT: "${STINGRAY_DASHBOARD_PORT:-8050}"
       STINGRAY_DEFAULT_DATASET: "${STINGRAY_DEFAULT_DATASET:-}"
     restart: unless-stopped

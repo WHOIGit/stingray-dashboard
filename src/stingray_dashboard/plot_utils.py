@@ -138,6 +138,60 @@ def get_point_id_from_event_point(point, trace_point_ids=None):
     )
 
 
+def selection_shapes(selected_data):
+    """Box/lasso geometry from a Plotly selection event as layout.selections."""
+    if not selected_data:
+        return []
+    box = selected_data.get("range")
+    if box and "x" in box and "y" in box:
+        return [dict(type="rect", xref="x", yref="y",
+                     x0=box["x"][0], x1=box["x"][1], y0=box["y"][0], y1=box["y"][1])]
+    lasso = selected_data.get("lassoPoints")
+    if lasso and lasso.get("x"):
+        path = "M" + "L".join(f"{x},{y}" for x, y in zip(lasso["x"], lasso["y"])) + "Z"
+        return [dict(type="path", xref="x", yref="y", path=path)]
+    return []
+
+
+def apply_selection(fig, selection, graph_id=None, axes=None):
+    """
+    Highlight the stored cross-plot selection on a freshly built figure.
+
+    A rebuilt figure otherwise loses its highlighted points while the other
+    linked plots still show them. Traces without point-ID customdata
+    (contours, bathymetry, stations) are left alone.
+
+    When this graph is where the selection was drawn and its axes are
+    unchanged, the box/lasso is restored too. Without it Plotly fires
+    plotly_deselect on redraw, which Dash reports as a cleared selection.
+    """
+    selection = selection or {}
+    selected_ids = selection.get("selected_ids")
+    if not selected_ids:
+        return fig
+    if (
+        graph_id is not None
+        and selection.get("source") == graph_id
+        and selection.get("axes") == axes
+        and selection.get("selections")
+    ):
+        fig.update_layout(selections=selection["selections"])
+    ids = np.asarray(selected_ids, dtype=float)
+    for trace in fig.data:
+        customdata = getattr(trace, "customdata", None)
+        if customdata is None or len(customdata) == 0:
+            continue
+        point_ids = np.asarray(
+            [
+                value[0] if isinstance(value, (list, tuple, np.ndarray)) else value
+                for value in customdata
+            ],
+            dtype=float,
+        )
+        trace.selectedpoints = np.nonzero(np.isin(point_ids, ids))[0].tolist()
+    return fig
+
+
 def get_row_by_point_id(df: pd.DataFrame, point_id: int) -> pd.Series | None:
     """
     Recover observation x_i by stable point_id i.

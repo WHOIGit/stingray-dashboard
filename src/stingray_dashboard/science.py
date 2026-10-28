@@ -63,3 +63,35 @@ def density_grid(tmin, tmax, smin, smax):
     T, S = np.meshgrid(t_values, s_values, indexing="ij")
     D = ies80(S, T, 0) - 1000
     return t_values, s_values, D
+
+
+def polynomial_fit(x, y, degree, curve_points=200):
+    """
+    Least-squares polynomial fit of y on x for the scatter plot.
+
+    Non-finite pairs are dropped. Returns None when degree is 0/None.
+    Coefficients are in ascending powers and original units; R² is
+    1 - SS_res / SS_tot. Polynomial.fit works on a scaled domain, which
+    keeps higher degrees numerically stable.
+    """
+    if not degree:
+        return None
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x, y = x[finite], y[finite]
+    if len(x) <= degree or np.ptp(x) == 0:
+        return {"n": len(x), "degree": degree, "error": "Not enough distinct points to fit."}
+    poly = np.polynomial.Polynomial.fit(x, y, degree)
+    ss_res = float(np.sum((y - poly(x)) ** 2))
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    curve_x = np.linspace(x.min(), x.max(), curve_points)
+    return {
+        "n": len(x),
+        "degree": degree,
+        "coef": poly.convert().coef,
+        "r2": 1 - ss_res / ss_tot if ss_tot > 0 else float("nan"),
+        "rmse": float(np.sqrt(ss_res / len(x))),
+        "curve_x": curve_x,
+        "curve_y": poly(curve_x),
+    }

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
+import threading
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from .config import DEFAULT_MAX_TIME_GAP_SEC
+from .config import DEFAULT_MAX_TIME_GAP_SEC, find_alias, is_meta_var
 
 WORK_DIR = Path("dash_data")
 DATA_DIR = WORK_DIR / "data"
@@ -15,6 +16,9 @@ MISC_DIR = WORK_DIR / "misc"
 
 # Cache structures
 DATA_CACHE = {}
+# Guards cache loads and evictions when gunicorn runs several threads
+# (gthread worker); a file is loaded once even if requested concurrently.
+CACHE_LOCK = threading.RLock()
 CSV_HEADER_CACHE = {}
 SENSOR_VAR_CACHE = {}
 PROFILE_VAR_CACHE = {}
@@ -99,12 +103,12 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         c = re.sub(r"_[0-9]+$", "", c)  # T090_1 -> t090, Sal00_2 -> sal00
         return c
     cols = {norm_colname(c): c for c in df.columns}
+    # Only the structural columns every plot needs are normalised here.
+    # Sensor columns keep their own names (t090c, sal00, ...) and are found
+    # through config.SENSOR_ALIASES instead of being copied.
     aliases = {
         "latitude": ["latitude", "lat"],
         "longitude": ["longitude", "lon"],
-        "temperature": ["temperature", "t090", "t090c", "t190", "t190c"],
-        "salinity": ["salinity", "sal00", "sal11"],
-        "pressure": ["pressure", "press", "prd", "prdm"],
         "depth": ["depth", "depsm", "z"],
         "times": ["times", "time"],
         "date": ["date"],
@@ -116,8 +120,9 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
                     df[canon] = df[cols[n]]
                     break
     cols = {norm_colname(c): c for c in df.columns}
-    if "depth" not in cols and "pressure" in cols:
-        df["depth"] = df[cols["pressure"]]
+    pressure_col = find_alias(df.columns, "pressure")
+    if "depth" not in cols and pressure_col is not None:
+        df["depth"] = df[pressure_col]
     has_date = "date" in cols
     has_times = "times" in cols
     if has_times:
@@ -142,6 +147,44 @@ def canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
             df["times"] = pd.NaT
     return df
 
+NUMERIC_TEXT_THRESHOLD = 0.95
+
+
+def coerce_numeric_columns(df: pd.DataFrame, threshold: float = NUMERIC_TEXT_THRESHOLD) -> pd.DataFrame:
+    """Convert text columns that are mostly numbers to numeric.
+
+    A column read as text because of a few stray entries ("n/a", "--") is
+    converted when at least ``threshold`` of its non-empty values parse as
+    numbers; the entries that don't parse become NaN. Genuine text columns
+    (status labels, media names, dates) are left as they are.
+    """
+    for col in df.columns:
+        if col == "times":
+            continue
+        series = df[col]
+        if not (pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series)):
+            continue
+        text = series.dropna().astype(str).str.strip()
+        text = text[text != ""]
+        if text.empty:
+            continue
+        parsed = pd.to_numeric(text, errors="coerce")
+        if parsed.notna().mean() >= threshold:
+            df[col] = pd.to_numeric(series, errors="coerce")
+    return df
+
+
+def plot_variables(df: pd.DataFrame) -> list[str]:
+    """Numeric sensor columns offered in the plot variable lists."""
+    return [
+        col for col in df.columns
+        if col != "point_id"
+        and "_std" not in col
+        and not is_meta_var(col)
+        and pd.api.types.is_numeric_dtype(df[col])
+    ]
+
+
 def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode="subsample"):
     dataset_path = DATA_DIR / dataset
     csv_path = dataset_path / f"{file_name}.csv"
@@ -151,23 +194,25 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
     # =========================================================
     # RAW DATA CACHE
     # =========================================================
-    if base_key not in DATA_CACHE:
-        # Read the dataset once; downstream steps normalize columns and types.
-        df = pd.read_csv(csv_path, low_memory=False)
-        df = canonicalize_columns(df)
-        # downcast for memory efficiency
-        int_cols = df.select_dtypes(include=["int64"]).columns
-        for col in int_cols:
-            s = df[col]
-            if s.min() >= np.iinfo(np.int32).min and s.max() <= np.iinfo(np.int32).max:
-                df[col] = s.astype(np.int32)
-        if "point_id" not in df.columns:
-            df = df.assign(point_id=np.arange(len(df), dtype=np.int32))
-        df = df.set_index("point_id", drop=False)
-        if len(DATA_CACHE) >= MAX_DATA_CACHE:
-            DATA_CACHE.pop(next(iter(DATA_CACHE)))
-        DATA_CACHE[base_key] = df
-    df = DATA_CACHE[base_key]
+    with CACHE_LOCK:
+        df = DATA_CACHE.get(base_key)
+        if df is None:
+            # Read the dataset once; downstream steps normalize columns and types.
+            df = pd.read_csv(csv_path, low_memory=False)
+            df = canonicalize_columns(df)
+            df = coerce_numeric_columns(df)
+            # downcast for memory efficiency
+            int_cols = df.select_dtypes(include=["int64"]).columns
+            for col in int_cols:
+                s = df[col]
+                if s.min() >= np.iinfo(np.int32).min and s.max() <= np.iinfo(np.int32).max:
+                    df[col] = s.astype(np.int32)
+            if "point_id" not in df.columns:
+                df = df.assign(point_id=np.arange(len(df), dtype=np.int32))
+            df = df.set_index("point_id", drop=False)
+            if len(DATA_CACHE) >= MAX_DATA_CACHE:
+                DATA_CACHE.pop(next(iter(DATA_CACHE)))
+            DATA_CACHE[base_key] = df
     # =========================================================
     # AUTO SUBSAMPLING
     # =========================================================
@@ -194,8 +239,9 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
     if mode == "average":
         max_gap = getattr(load_data, "_max_gap_seconds", DEFAULT_MAX_TIME_GAP_SEC)
         avg_key = f"{base_key}/{sub_sample}/{max_gap}"
-        if avg_key in AVERAGE_CACHE:
-            return AVERAGE_CACHE[avg_key]
+        cached = AVERAGE_CACHE.get(avg_key)
+        if cached is not None:
+            return cached
         n = len(df)
         if n == 0:
             return df
@@ -263,9 +309,10 @@ def load_data(dataset: str, file_name: str, sub_sample: int | None = None, mode=
         # -----------------------------------------------------
         # Cache
         # -----------------------------------------------------
-        if len(AVERAGE_CACHE) >= MAX_AVG_CACHE:
-            AVERAGE_CACHE.pop(next(iter(AVERAGE_CACHE)))
-        AVERAGE_CACHE[avg_key] = out
+        with CACHE_LOCK:
+            if len(AVERAGE_CACHE) >= MAX_AVG_CACHE:
+                AVERAGE_CACHE.pop(next(iter(AVERAGE_CACHE)))
+            AVERAGE_CACHE[avg_key] = out
         return out
     
 def init_data_paths(work_dir: str | Path | None = None) -> None:

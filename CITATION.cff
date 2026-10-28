@@ -2,16 +2,24 @@ cff-version: 1.2.0
 message: "If you use Stingray Dashboard, please cite it using this file."
 title: "Stingray Dashboard"
 type: software
-version: "3.2.1"
+version: "3.3.0"
+date-released: "2026-10-29"
 authors:
   - family-names: Pham
     given-names: Anh H.
+    affiliation: Woods Hole Oceanographic Institution
+  - family-names: Crockford
+    given-names: E. Taylor
+    affiliation: Woods Hole Oceanographic Institution
+  - family-names: Sosik
+    given-names: Heidi M.
+    affiliation: Woods Hole Oceanographic Institution
 repository-code: "https://github.com/WHOIGit/stingray-dashboard"
 license: MIT
 identifiers:
   - type: doi
-    value: "10.5281/zenodo.15025962"
-    description: "Zenodo record for the Stingray Dashboard"
+    value: "10.5281/zenodo.15025961"
+    description: "Zenodo concept DOI for the Stingray Dashboard (all versions)"
 keywords:
   - NES-LTER
   - oceanography

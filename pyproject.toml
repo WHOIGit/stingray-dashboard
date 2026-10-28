@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stingray-dashboard"
-version = "3.2.1"
+version = "3.3.0"
 description = "Installable Dash application for the NES-LTER Stingray dashboard"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,8 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [
     { name = "Anh H. Pham" },
+    { name = "E. Taylor Crockford" },
+    { name = "Heidi M. Sosik" },
 ]
 keywords = [
     "NES-LTER",
@@ -27,6 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "dash>=4.2,<5",
+    "flask-compress>=1.13",
     "numpy>=1.26",
     "pandas>=2.0",
     "plotly>=7,<8",

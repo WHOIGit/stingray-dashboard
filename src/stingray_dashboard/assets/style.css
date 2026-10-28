@@ -2,12 +2,39 @@
    GLOBAL PAGE SETTINGS
    ========================================================== */
 
+/* Colours: one place to change them (and the hook for a dark theme later) */
+:root {
+  --bg: #fff;
+  --card: #fff;
+  --border: #e3e7ec;
+  --text: #183554;
+  --control-h: 34px;   /* height shared by dropdowns, buttons and More menus */
+  --toolbar-bg: #eef3f8;  /* light navy tint for toolbars */
+}
+
+/* Uniform control size: every button and More menu matches the dropdowns */
+#refresh-button,
+#download-button,
+#download-confirm-button,
+.modal-secondary-button,
+.detail-nav button,
+.more-menu > summary {
+  height: var(--control-h);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 1;
+}
+
 /* Base page style */
 body {
   font-family: Arial, sans-serif;   /* global font */
   margin: 0;
   padding: 0;
-  background-color: #fff;           /* white background */
+  background-color: var(--bg);
   overflow-x: hidden;
   overflow-y: hidden;               /* keep the page chrome fixed while the plot area scrolls */
 }
@@ -21,12 +48,13 @@ body {
 ._dash-container {
   max-width: 1400px;                /* center content with max width */
   margin: auto;
-  padding: 6px 6px 0;
+  padding: 0 6px;                   /* no top/bottom gap: header and footer sit flush */
   box-sizing: border-box;
 }
 
 .dashboard-shell {
-  height: calc(100vh - 6px);        /* account for top Dash container padding */
+  height: 100vh;
+  height: 100dvh;                   /* exact visible height where supported */
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -64,11 +92,11 @@ h1, h2, h3 {
    PANELS & CARDS
    ========================================================== */
 
-/* Generic control panel */
+/* Generic control panel: white with a thin border, no grey fill */
 .panel {
-  background-color: #f8f8f8;
+  background-color: var(--card);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   padding: 10px;
   margin-bottom: 10px;
   box-sizing: border-box;
@@ -76,7 +104,7 @@ h1, h2, h3 {
 
 /* Information cards (right panel) */
 .card {
-  background-color: #fff;
+  background-color: var(--card);
   border-radius: 6px;
   padding: 10px;
 }
@@ -110,15 +138,15 @@ h1, h2, h3 {
 /* Secondary white header */
 .header-sub {
   background-color: #fff;
-  padding: 8px 24px;
-  margin-bottom: 10px;
+  padding: 4px 24px;
+  margin-bottom: 6px;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
 /* Main title */
 .header-title {
   color: #183554;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: bold;
   white-space: nowrap;
 }
@@ -209,34 +237,142 @@ select {
    PLOT CONTAINERS
    ========================================================== */
 
-/* Cruise track plot (top plot) */
-.cruise-track-graph {
-  width: 100%;
-  height: 320px;        /* default height */
-  margin-bottom: 12px;
+/* Each plot sits in a card with a one-line toolbar above it */
+.plot-card {
+  flex: 0 0 auto;
+  max-width: 100%;
+  margin-bottom: 0;
+  padding: 8px;
 }
 
-/* Main transect plot */
-.main-graph {
-  width: 100%;
-  height: 620px;        /* taller main visualization */
-  margin-bottom: 12px;
+/* Cruise track and transect take a full row */
+.plot-card-wide {
+  flex-basis: 100%;
 }
 
-/* T-S diagram
-   default ratio = 1 : 1.2 */
-.ts-graph {
-  width: 520px;
-  height: 620px;        
-  margin: 0 auto 12px;  /* center horizontally */
+/* T-S and profile share a row, wrapping only when the plots can't fit */
+.plot-card:not(.plot-card-wide) {
+  flex: 1 1 516px;
+  min-width: 0;
 }
 
-/* Profile plot
-   default ratio = 1 : 1.5 */
-.profile-graph {
-  width: 520px;
-  height: 780px;        /* 520 × 1.5 */
-  margin: 0 auto 12px;
+.plot-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  /* full card width, tinted to stand apart from the plot */
+  margin: -8px -8px 6px;
+  padding: 6px 8px;
+  background-color: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+}
+
+.plot-toolbar .section-label {
+  margin-bottom: 0;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.toolbar-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-field label {
+  white-space: nowrap;
+}
+
+.toolbar-control {
+  width: 160px;
+}
+
+.toolbar-control-narrow {
+  width: 120px;
+}
+
+.toolbar-control:has(.toolbar-radio) {
+  width: auto;
+}
+
+.toolbar-radio {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  color: #183554;
+}
+
+.toolbar-radio label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.toolbar-check label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+/* Secondary options: popover that floats over the plot */
+.more-menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.more-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #183554;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  background-color: #fff;
+  user-select: none;
+}
+
+.more-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.more-menu[open] > summary {
+  background-color: #e8eef5;
+}
+
+.more-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  width: 340px;
+  padding: 10px;
+  background-color: #fff;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+  box-sizing: border-box;
+}
+
+.more-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.range-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+}
+
+.range-sep {
+  color: #183554;
+  font-size: 13px;
 }
 
 
@@ -249,6 +385,7 @@ select {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex-shrink: 0;
   margin-bottom: 8px;
   position: sticky;
   top: 0;
@@ -261,6 +398,7 @@ select {
   display: block;
   padding: 6px 8px;
   margin-bottom: 0;
+  background-color: var(--toolbar-bg);
 }
 
 .global-panel .section-label {
@@ -275,14 +413,62 @@ select {
   gap: 10px;
 }
 
+/* GLOBAL OPTIONS title, Dataset, Data file, Refresh, Download ... More
+   (right corner), on one centred row with labels beside their dropdowns */
 .global-panel .global-fields {
   grid-template-columns:
-    minmax(140px, 1.2fr)
-    minmax(140px, 1.2fr)
-    repeat(6, minmax(96px, 130px))
-    minmax(70px, 90px)
     auto
-    auto;
+    minmax(200px, 320px)
+    minmax(200px, 320px)
+    auto
+    auto
+    1fr;
+  align-items: center;
+}
+
+.global-panel .global-fields > .section-label {
+  margin-bottom: 0;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.global-panel .control-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.global-panel .control-field > :not(label) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.global-more {
+  align-self: center;
+  justify-self: end;
+}
+
+.global-more .more-panel {
+  width: 460px;   /* two columns wide enough for the dropdowns */
+}
+
+/* Two columns of fields inside a More popover */
+.more-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+/* Square icon-only refresh button, same height as the dropdowns */
+#refresh-button {
+  align-self: center;
+  justify-self: start;
+  width: var(--control-h);
+  min-width: 0;
+  padding: 0;
+  margin-bottom: 0;
+  font-size: 18px;
 }
 
 .global-panel label {
@@ -290,20 +476,13 @@ select {
   white-space: nowrap;
 }
 
-#refresh-button {
-  align-self: end;
-  justify-self: end;
-  width: auto;
-  min-width: 90px;
-}
-
 #download-button {
-  align-self: end;
-  justify-self: end;
+  align-self: center;
+  justify-self: start;
   width: auto;
   min-width: 110px;
   background-color: #007bff;
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 #download-button:hover {
@@ -396,101 +575,113 @@ select {
   background-color: #5c636a;
 }
 
+/* Global controls on top, plot/details area fills the rest. */
+.dashboard-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Plots scroll on the left; Details stays in view on the right. */
 .dashboard-body {
   width: 100%;
   min-height: 0;
   flex: 1 1 auto;
-  overflow: auto;
-  padding-right: 4px;
+  display: flex;
+  gap: 10px;
+  overflow: hidden;
   box-sizing: border-box;
 }
 
 .plot-workspace {
-  width: 100%;
-  min-width: 860px;
-}
-
-.plot-row {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  width: 100%;
-  margin-bottom: 12px;
-  box-sizing: border-box;
-}
-
-/* Keep the details card alongside both the transect and T-S plots. */
-.analysis-section {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  width: 100%;
-}
-
-.analysis-stack {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 10px;
+  padding: 2px 4px 10px 2px;
+  box-sizing: border-box;
 }
 
 .analysis-details {
-  flex: 0 0 360px;
-  min-width: 360px;
-  max-width: 360px;
+  flex: 0 0 var(--details-width, 360px);
+  min-width: var(--details-width, 360px);
+  max-width: var(--details-width, 360px);
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  padding-bottom: 10px;
   box-sizing: border-box;
 }
 
-.plot-controls {
-  flex: 0 0 240px;
-  min-width: 240px;
-  max-width: 240px;
-  margin-bottom: 0;
-  overflow-y: auto;
-}
-
+/* Default sizes; the W/H options override them inline. */
 .plot-area {
-  min-width: 0;
-}
-
-.right-slot {
-  flex: 0 0 360px;
-  min-width: 360px;
-  max-width: 360px;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 #track_container.plot-area {
-  flex: 0 0 auto;
   width: 900px;
   height: 320px;
 }
 
 #main_container.plot-area {
-  flex: 0 0 auto;
   width: 900px;
   height: 620px;
 }
 
-#ts_container.plot-area {
-  flex: 0 0 560px;
-  width: 560px;
-  height: 560px;
-  margin: 0 auto 12px;
-}
-
-#profile_container.plot-area {
-  flex: 0 0 520px;
-  width: 520px;
-  height: 780px;
-  margin: 0 auto 12px;
-}
-
-#track_container.plot-area,
-#main_container.plot-area,
 #ts_container.plot-area,
 #profile_container.plot-area {
-  margin-left: auto;
-  margin-right: auto;
+  width: 500px;
+  height: 620px;
+}
+
+#scatter_container.plot-area {
+  width: 640px;
+  height: 520px;
+}
+
+/* Plot with a side panel (scatter fit summary) */
+.plot-body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.plot-body > .plot-area {
+  margin: 0;
+  min-width: 0;
+}
+
+.fit-summary {
+  flex: 0 0 230px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #183554;
+  border: 1px solid var(--border);
+}
+
+.fit-title {
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.fit-equation {
+  margin: 0 0 6px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fit-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #5a6b7d;
 }
 
 .control-field {
@@ -499,15 +690,89 @@ select {
 
 /* Right info panel */
 .right-panel {
-  flex: 0 0 360px;
-  min-width: 360px;
-  max-width: 360px;
+  flex: 0 0 var(--details-width, 360px);
+  min-width: var(--details-width, 360px);
+  max-width: var(--details-width, 360px);
 
   font-size: 13px;
   color: #183554;
   line-height: 1.35;
 
   padding-left: 8px;
+}
+
+/* Ring over the Details point on the linked plots (assets/details.js) */
+.detail-ring {
+  position: absolute;
+  z-index: 5;
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #e00000;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Drag handle between the plots and Details (assets/details.js) */
+.details-resizer {
+  flex: 0 0 6px;
+  margin: 0 -2px;
+  cursor: col-resize;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.details-resizer:hover,
+.details-resizer.dragging {
+  background-color: #b8c7d9;
+}
+
+body.resizing-details {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Details title with Prev/Next point buttons */
+.details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  padding-right: 8px;  /* match the panel's left padding */
+}
+
+.detail-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+
+.detail-nav button {
+  background-color: #007bff;
+}
+
+.detail-nav button:hover {
+  background-color: #0056b3;
+}
+
+/* Camera frame that failed to load (set by assets/details.js) */
+.frame-block[data-frame-missing] img {
+  display: none;
+}
+
+.frame-block[data-frame-missing]::after {
+  content: "Frame not available";
+  display: block;
+  margin-bottom: 12px;
+  padding: 10px;
+  font-size: 12px;
+  color: #5a6b7d;
+  text-align: center;
+  background-color: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
 }
 
 /* Right panel titles */
@@ -521,12 +786,12 @@ select {
 .right-panel .card {
   font-size: 12.5px;
   padding: 6px 8px;
-  background-color: #fff;
+  background-color: var(--card);
+  border: 1px solid var(--border);
   border-radius: 5px;
 
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-
   flex: 1 1 auto;
+  min-height: 0;
   max-height: none;
   overflow-y: auto;
 }
@@ -543,18 +808,11 @@ select {
     max-width: 100%;
   }
 
-  .plot-workspace {
-    width: 100%;
-    min-width: 100%;
-    max-width: 100%;
-  }
-
-  .right-slot,
   .right-panel,
   .analysis-details {
-    flex: 0 0 300px;
-    min-width: 300px;
-    max-width: 300px;
+    flex: 0 0 var(--details-width, 300px);
+    min-width: var(--details-width, 300px);
+    max-width: var(--details-width, 300px);
   }
 }
 
@@ -581,26 +839,19 @@ select {
     flex-direction: column;
   }
 
-  .plot-workspace,
-  .right-slot,
   .right-panel,
-  .analysis-section,
   .analysis-details {
+    flex: 0 0 auto;
     width: 100%;
     max-width: 100%;
     min-width: 100%;
+    padding-left: 0;
   }
 
-  .plot-row {
-    flex-direction: column;
+  .details-resizer {
+    display: none;
   }
 
-  .analysis-section {
-    display: block;
-  }
-
-
-  .plot-controls,
   .dataset-panel,
   .options-panel,
   .layout-panel {
@@ -617,19 +868,41 @@ select {
     position: static;
   }
 
+  .dashboard-main {
+    display: block;
+  }
+
   .dashboard-body {
+    flex-direction: column;
     height: auto;
     max-height: none;
     overflow: visible;
   }
 
-  .plot-row > .right-slot:empty {
-    display: none;
+  .plot-workspace {
+    overflow: visible;
   }
 
-  .ts-graph,
-  .profile-graph {
-    max-width: 100%;
+  /* Plots fill the screen width; custom W settings apply on wide screens only. */
+  .plot-card {
+    flex-basis: 100%;
+  }
+
+  .plot-area.plot-area {
+    width: 100% !important;
+  }
+
+  .more-panel {
+    width: min(340px, calc(100vw - 40px));
+  }
+
+  .plot-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fit-summary {
+    flex-basis: auto;
   }
 }
 

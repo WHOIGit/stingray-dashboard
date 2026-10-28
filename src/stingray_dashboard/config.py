@@ -63,8 +63,37 @@ unit_patterns = {
                ],
 }
 
+# ============================================
+# Sensor aliases
+# ============================================
+# Instrument exports keep their own column names (e.g. SeaBird t090c, sal00).
+# Columns are not renamed or copied; code that needs a quantity looks it up
+# here. Order matters: the first name present in a file wins, so primary
+# sensors come before secondary ones.
+SENSOR_ALIASES = {
+    "temperature": ["temperature", "t090c", "t090", "t190c", "t190"],
+    "salinity": ["salinity", "sal00", "sal11"],
+    "chlorophyll": ["chlorophyll", "fleco_afl", "chl", "fluor"],
+    "pressure": ["pressure", "prdm", "prd", "press"],
+    "backscattering": ["backscattering", "bb", "bbp"],
+}
+
+
+def find_alias(columns, quantity):
+    """Column in ``columns`` that holds ``quantity``, or None."""
+    present = set(columns)
+    for name in SENSOR_ALIASES.get(quantity, [quantity]):
+        if name in present:
+            return name
+    return None
+
+
 def get_unit(varname):
     vn = varname.lower()
+    # A recognised alias takes the unit of its quantity (t090c -> °C).
+    for quantity, names in SENSOR_ALIASES.items():
+        if vn in names and vn != quantity:
+            return get_unit(quantity)
     # split variable name into tokens
     tokens = vn.replace("-", "_").split("_")
     for unit, pats in unit_patterns.items():
@@ -86,17 +115,19 @@ URL_SYNCED_PARAMS = [
     {"key": "variable", "id": "color_variable", "default": "temperature", "type": "string"},
     {"key": "colormap", "id": "color_map", "default": "Jet", "type": "string"},
     {"key": "size", "id": "size", "default": 5, "type": "int"},
-    {"key": "zmin", "id": "z_min", "default": 0, "type": "float"},
-    {"key": "zmax", "id": "z_max", "default": 200, "type": "float"},
+    {"key": "zmin", "id": "z_min", "default": None, "type": "float"},
+    {"key": "zmax", "id": "z_max", "default": None, "type": "float"},
     {"key": "latmin", "id": "lat_min", "default": None, "type": "float"},
     {"key": "latmax", "id": "lat_max", "default": None, "type": "float"},
     {"key": "lonmin", "id": "lon_min", "default": None, "type": "float"},
     {"key": "lonmax", "id": "lon_max", "default": None, "type": "float"},
     {"key": "vmin", "id": "v_min", "default": None, "type": "float", "write": False},
     {"key": "vmax", "id": "v_max", "default": None, "type": "float", "write": False},
-    {"key": "opacity", "id": "hidden_opacity", "default": 0.1, "type": "float"},
+    {"key": "opacity", "id": "hidden_opacity", "default": 0.05, "type": "float"},
     {"key": "bathymetry", "id": "bathymetry", "default": ["True"], "type": "list"},
     {"key": "station", "id": "station", "default": ["True"], "type": "list"},
+    {"key": "dmark", "id": "detail_marker", "default": ["True"], "type": "list"},
+    {"key": "dmarkcolor", "id": "detail_marker_color", "default": "#e00000", "type": "string"},
     # TS plot
     {"key": "tsvar", "id": "ts_color_variable", "default": "chlorophyll", "type": "string"},
     {"key": "tsmap", "id": "ts_color_map", "default": "Viridis", "type": "string"},
@@ -105,6 +136,20 @@ URL_SYNCED_PARAMS = [
     # profile plot
     {"key": "profilevar", "id": "profile_variable", "default": "chlorophyll", "type": "string"},
     {"key": "profilemap", "id": "profile_color_map", "default": "Plotly", "type": "string"},
+    # scatter plot
+    {"key": "sx", "id": "scatter_x", "default": None, "type": "string", "restore_missing": False},
+    {"key": "sy", "id": "scatter_y", "default": None, "type": "string", "restore_missing": False},
+    {"key": "scolor", "id": "scatter_color", "default": "depth", "type": "string"},
+    {"key": "smap", "id": "scatter_color_map", "default": "Turbo", "type": "string"},
+    {"key": "sfit", "id": "scatter_fit_degree", "default": 0, "type": "int"},
+    {"key": "sfitsel", "id": "scatter_fit_selected", "default": [], "type": "list"},
+    {"key": "sfitcolor", "id": "scatter_fit_color", "default": "#d62728", "type": "string"},
+    {"key": "svmin", "id": "scatter_v_min", "default": None, "type": "float", "write": False},
+    {"key": "svmax", "id": "scatter_v_max", "default": None, "type": "float", "write": False},
+    {"key": "sxmin", "id": "scatter_x_min", "default": None, "type": "float"},
+    {"key": "sxmax", "id": "scatter_x_max", "default": None, "type": "float"},
+    {"key": "symin", "id": "scatter_y_min", "default": None, "type": "float"},
+    {"key": "symax", "id": "scatter_y_max", "default": None, "type": "float"},
     # sampling / averaging
     {"key": "sampling", "id": "sampling_mode", "default": "subsample", "type": "string"},
     {"key": "subsample", "id": "sub_sample", "default": DEFAULT_SUBSAMPLE, "type": "int"},
@@ -114,10 +159,12 @@ URL_SYNCED_PARAMS = [
     {"key": "trackh", "id": "track_height", "default": 320, "type": "int"},
     {"key": "mainw", "id": "main_width", "default": 900, "type": "int"},
     {"key": "mainh", "id": "main_height", "default": 620, "type": "int"},
-    {"key": "tsw", "id": "ts_width", "default": 560, "type": "int"},
-    {"key": "tsh", "id": "ts_height", "default": 660, "type": "int"},
-    {"key": "profilew", "id": "profile_width", "default": 520, "type": "int"},
-    {"key": "profileh", "id": "profile_height", "default": 780, "type": "int"},
+    {"key": "tsw", "id": "ts_width", "default": 500, "type": "int"},
+    {"key": "tsh", "id": "ts_height", "default": 620, "type": "int"},
+    {"key": "profilew", "id": "profile_width", "default": 500, "type": "int"},
+    {"key": "profileh", "id": "profile_height", "default": 620, "type": "int"},
+    {"key": "scatterw", "id": "scatter_width", "default": 640, "type": "int"},
+    {"key": "scatterh", "id": "scatter_height", "default": 520, "type": "int"},
     # global text
     {"key": "fontsize", "id": "plot_font_size", "default": 14, "type": "int"},
 ]

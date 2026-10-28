@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 import re
+import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import dash
@@ -10,7 +11,8 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Input, Output, Patch, State, ctx, dcc, html, no_update
+import plotly.io as pio
+from dash import ClientsideFunction, Input, Output, Patch, State, ctx, dcc, html, no_update
 from flask import has_request_context, request
 
 from . import data
@@ -18,10 +20,13 @@ from .config import (
     DOWNLOADS_ENABLED,
     URL_SYNCED_PARAMS,
     choose_default_dataset,
+    find_alias,
     get_unit,
     is_meta_var,
 )
 from .plot_utils import (
+    apply_selection,
+    selection_shapes,
     dynamic_ticks,
     get_palette,
     get_point_id_from_event_point,
@@ -30,9 +35,12 @@ from .plot_utils import (
     is_discrete_variable,
     resolve_range,
 )
-from .science import density_grid
+from .layout import default_scatter_axes
+from .science import density_grid, polynomial_fit
 
 logger = logging.getLogger(__name__)
+# White background for figures that don't set one (e.g. empty-state messages).
+pio.templates.default = "plotly_white"
 EMAIL_RE = re.compile(
     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -51,6 +59,9 @@ def _serialize_url_value(value, typ):
 def _deserialize_url_value(raw, typ, default=None):
     if raw is None:
         return default
+    if raw == "":
+        # Explicitly emptied control, e.g. an unticked checkbox.
+        return [] if typ == "list" else None
     if typ == "string":
         return raw
     if typ == "int":
@@ -68,6 +79,20 @@ def _deserialize_url_value(raw, typ, default=None):
             return []
         return [x for x in raw.split(",") if x != ""]
     return default
+
+def _url_param_text(param, value):
+    """Text a synced control contributes to the URL, or None when omitted
+    (empty, default, or not written)."""
+    if param.get("write", True) is False:
+        return None
+    default = param.get("default")
+    if value == default:
+        return None
+    if value in (None, "", []):
+        # Record an emptied control whose default isn't empty, otherwise a
+        # link or Back would silently restore the default.
+        return None if default in (None, "", []) else ""
+    return _serialize_url_value(value, param["type"])
 
 def _is_valid_email(email: str | None) -> bool:
     return bool(email and EMAIL_RE.fullmatch(email.strip()))
@@ -124,9 +149,27 @@ def _log_csv_download(
 def register_callbacks(app: dash.Dash) -> None:
     # Extract only trace-wise point IDs in the browser. Selection callbacks
     # use these compact arrays instead of transferring complete Plotly figures.
-    app.clientside_callback(
+    # 1-D point-ID customdata arrives Plotly-encoded ({dtype, bdata}, base64);
+    # 2-D customdata with labels stays a list of [point_id, label] rows.
+    point_ids_js = (
         """
         function(figure) {
+            var TYPED = {
+                i1: Int8Array, u1: Uint8Array, i2: Int16Array, u2: Uint16Array,
+                i4: Int32Array, u4: Uint32Array, f4: Float32Array, f8: Float64Array
+            };
+            function decode(encoded) {
+                var Typed = TYPED[encoded.dtype];
+                if (!Typed) {
+                    return [];
+                }
+                var raw = atob(encoded.bdata);
+                var bytes = new Uint8Array(raw.length);
+                for (var i = 0; i < raw.length; i++) {
+                    bytes[i] = raw.charCodeAt(i);
+                }
+                return Array.from(new Typed(bytes.buffer));
+            }
             function pointIdValue(value) {
                 if (value == null) {
                     return null;
@@ -141,48 +184,26 @@ def register_callbacks(app: dash.Dash) -> None:
                 return [];
             }
             return figure.data.map(function(trace) {
-                if (!trace.customdata) {
+                var customdata = trace.customdata;
+                if (!customdata) {
                     return [];
                 }
-                return Array.from(trace.customdata, function(value) {
+                if (customdata.bdata && customdata.dtype) {
+                    return decode(customdata);
+                }
+                return Array.from(customdata, function(value) {
                     return pointIdValue(value);
                 });
             });
         }
-        """,
-        Output("main_plot_point_ids", "data"),
-        Input("main_plot", "figure"),
-    )
-
-    app.clientside_callback(
         """
-        function(figure) {
-            function pointIdValue(value) {
-                if (value == null) {
-                    return null;
-                }
-                if (Array.isArray(value) || ArrayBuffer.isView(value)) {
-                    return value.length ? value[0] : null;
-                }
-                return value;
-            }
-
-            if (!figure || !figure.data) {
-                return [];
-            }
-            return figure.data.map(function(trace) {
-                if (!trace.customdata) {
-                    return [];
-                }
-                return Array.from(trace.customdata, function(value) {
-                    return pointIdValue(value);
-                });
-            });
-        }
-        """,
-        Output("ts_plot_point_ids", "data"),
-        Input("ts_plot", "figure"),
     )
+    for graph_id in ("main_plot", "ts_plot", "scatter_plot"):
+        app.clientside_callback(
+            point_ids_js,
+            Output(f"{graph_id}_point_ids", "data"),
+            Input(graph_id, "figure"),
+        )
 
     def _plot_export_config(dataset, csv_file, plot_type, *parts):
         """Build a safe Plotly image-export filename from the active plot settings."""
@@ -239,6 +260,17 @@ def register_callbacks(app: dash.Dash) -> None:
     def update_profile_plot_export_config(dataset, csv_file, variable):
         return _plot_export_config(dataset, csv_file, "profile", variable)
 
+
+    @app.callback(
+        Output("scatter_plot", "config"),
+        Input("dataset_selector", "value"),
+        Input("csv_selector", "value"),
+        Input("scatter_x", "value"),
+        Input("scatter_y", "value"),
+    )
+    def update_scatter_plot_export_config(dataset, csv_file, x_var, y_var):
+        return _plot_export_config(dataset, csv_file, "scatter", x_var, y_var)
+
     @app.callback(
         Output('download-confirm-button', 'disabled'),
         Input('download-name', 'value'),
@@ -269,7 +301,7 @@ def register_callbacks(app: dash.Dash) -> None:
         file_name = current_values.get("file")
         if not dataset or not file_name:
             return no_update
-        existing_params = parse_qs(urlparse(current_search or "").query)
+        existing_params = parse_qs(urlparse(current_search or "").query, keep_blank_values=True)
         params = {
             k: v[0]
             for k, v in existing_params.items()
@@ -281,18 +313,7 @@ def register_callbacks(app: dash.Dash) -> None:
             key = p["key"]
             if key in ("dataset", "file"):
                 continue
-            if p.get("write", True) is False:
-                params.pop(key, None)
-                continue
-            val = current_values.get(key)
-            default = p.get("default")
-            if val in (None, "", []):
-                params.pop(key, None)
-                continue
-            if val == default:
-                params.pop(key, None)
-                continue
-            sval = _serialize_url_value(val, p["type"])
+            sval = _url_param_text(p, current_values.get(key))
             if sval is None:
                 params.pop(key, None)
             else:
@@ -307,11 +328,14 @@ def register_callbacks(app: dash.Dash) -> None:
         [Output(p["id"], "value", allow_duplicate=True) for p in URL_SYNCED_PARAMS] +
         [Output("url_restore_done", "data", allow_duplicate=True)],
         Input("url", "search"),
+        [State(p["id"], "value") for p in URL_SYNCED_PARAMS],
+        State("url_restore_done", "data"),
         prevent_initial_call="initial_duplicate",
     )
-    def restore_from_url(search):
+    def restore_from_url(search, *state):
+        *current_values, restore_done = state
         datasets = data.scan_datasets()
-        params = parse_qs(urlparse(search or "").query)
+        params = parse_qs(urlparse(search or "").query, keep_blank_values=True)
         dataset_default = choose_default_dataset(datasets)
         dataset_val = params.get("dataset", [dataset_default])[0]
         if dataset_val not in datasets:
@@ -341,7 +365,28 @@ def register_callbacks(app: dash.Dash) -> None:
                 raw = params.get(key, [None])[0]
                 val = _deserialize_url_value(raw, typ, defaults.get(key))
             results.append(val)
-        return results + [True]
+        if not restore_done:
+            # Initial page load: apply the full URL state.
+            return results + [True]
+        # Later URL changes are usually the dashboard's own writes. Only push
+        # settings whose URL text differs from the current control, so a
+        # change to one plot doesn't reset every control and rebuild all plots.
+        # Browser back/forward and edited links still restore what changed.
+        updates = []
+        for p, url_val, current in zip(URL_SYNCED_PARAMS, results, current_values):
+            if p["key"] in ("dataset", "file"):
+                changed = url_val != current
+            elif p["key"] not in params and p.get("restore_missing", True) is False:
+                changed = False
+            else:
+                changed = (
+                    p.get("write", True) is not False
+                    and params.get(p["key"], [None])[0] != _url_param_text(p, current)
+                )
+            updates.append(url_val if changed else no_update)
+        if all(u is no_update for u in updates):
+            raise dash.exceptions.PreventUpdate
+        return updates + [no_update]
 
     # --- Callback: Refresh available dataset list ---
     @app.callback(
@@ -431,25 +476,22 @@ def register_callbacks(app: dash.Dash) -> None:
             csv_path not in data.SENSOR_VAR_CACHE
             or csv_path not in data.PROFILE_VAR_CACHE
         ):
-            dfi = pd.read_csv(csv_path, nrows=1000, low_memory=True)
-            dfi = data.canonicalize_columns(dfi)
-            data.SENSOR_VAR_CACHE[csv_path] = [
-                c for c in dfi.columns
-                if "_std" not in c and not is_meta_var(c)
-            ]
-            data.PROFILE_VAR_CACHE[csv_path] = [
-                c for c in data.SENSOR_VAR_CACHE[csv_path]
-                if pd.api.types.is_numeric_dtype(dfi[c])
-            ]
+            # Same numeric-only rule for every plot list, from the loaded
+            # (type-converted) data rather than a sample of the raw CSV.
+            numeric_vars = data.plot_variables(data.load_data(dataset, csv_file))
+            data.SENSOR_VAR_CACHE[csv_path] = numeric_vars
+            data.PROFILE_VAR_CACHE[csv_path] = numeric_vars
         sensor_vars = data.SENSOR_VAR_CACHE[csv_path]
         profile_vars = data.PROFILE_VAR_CACHE[csv_path]
         options = [{'label': v.capitalize(), 'value': v} for v in sensor_vars]
         profile_options = [{'label': v.capitalize(), 'value': v} for v in profile_vars]
-        default_color = "temperature" if "temperature" in sensor_vars else (sensor_vars[0] if sensor_vars else None)
-        ts_candidates = [v for v in sensor_vars if v not in ['temperature', 'salinity']]
+        temp_col = find_alias(sensor_vars, "temperature")
+        sal_col = find_alias(sensor_vars, "salinity")
+        default_color = temp_col or (sensor_vars[0] if sensor_vars else None)
+        ts_candidates = [v for v in sensor_vars if v not in (temp_col, sal_col)]
         ts_options = [{'label': v.capitalize(), 'value': v} for v in ts_candidates]
-        default_ts = "chlorophyll" if "chlorophyll" in ts_candidates else (ts_candidates[0] if ts_candidates else None)
-        default_profile = "temperature" if "temperature" in profile_vars else (profile_vars[0] if profile_vars else None)
+        default_ts = find_alias(ts_candidates, "chlorophyll") or (ts_candidates[0] if ts_candidates else None)
+        default_profile = find_alias(profile_vars, "temperature") or (profile_vars[0] if profile_vars else None)
         params = parse_qs(urlparse(search or "").query)
         url_color = params.get("variable", [None])[0]
         url_ts = params.get("tsvar", [None])[0]
@@ -486,6 +528,61 @@ def register_callbacks(app: dash.Dash) -> None:
         return None, None
 
 
+    # --- Callback: Scatter plot variable choices ---
+    @app.callback(
+        Output('scatter_x', 'options'),
+        Output('scatter_x', 'value'),
+        Output('scatter_y', 'options'),
+        Output('scatter_y', 'value'),
+        Output('scatter_color', 'options'),
+        Output('scatter_color', 'value'),
+        Input('dataset_selector', 'value'),
+        Input('csv_selector', 'value'),
+        State('scatter_x', 'value'),
+        State('scatter_y', 'value'),
+        State('scatter_color', 'value'),
+        State('url', 'search'),
+        prevent_initial_call=True
+    )
+    def update_scatter_variable_options(dataset, csv_file, current_x, current_y,
+                                        current_color, search):
+        if not dataset or not csv_file:
+            return [], None, [], None, [{'label': 'None', 'value': 'none'}], 'none'
+        df = data.load_data(dataset, csv_file)
+        numeric_vars = data.plot_variables(df) + [
+            c for c in ("depth", "latitude", "longitude")
+            if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
+        ]
+        options = [{'label': v.capitalize(), 'value': v} for v in numeric_vars]
+        default_x, default_y = default_scatter_axes(numeric_vars)
+        params = parse_qs(urlparse(search or "").query)
+
+        def pick(url_key, current, default, allowed):
+            url_val = params.get(url_key, [None])[0]
+            if url_val in allowed:
+                return url_val
+            if current in allowed:
+                return current
+            return default
+
+        x_val = pick("sx", current_x, default_x, numeric_vars)
+        y_val = pick("sy", current_y, default_y, numeric_vars)
+        color_allowed = ['none'] + numeric_vars
+        color_default = 'depth' if 'depth' in numeric_vars else 'none'
+        color_val = pick("scolor", current_color, color_default, color_allowed)
+        color_options = [{'label': 'None', 'value': 'none'}] + options
+        return options, x_val, options, y_val, color_options, color_val
+
+    # --- Callback: Reset scatter color limits when color variable changes ---
+    @app.callback(
+        Output('scatter_v_min', 'value'),
+        Output('scatter_v_max', 'value'),
+        Input('scatter_color', 'value'),
+        prevent_initial_call=True
+    )
+    def reset_scatter_vmin_vmax(color_var):
+        return None, None
+
     # --- Callback: Reset time-series color limits when color variable changes ---
     @app.callback(
         Output('ts_v_min', 'value'),
@@ -502,6 +599,7 @@ def register_callbacks(app: dash.Dash) -> None:
         Output("main_container","style"),
         Output("ts_container","style"),
         Output("profile_container","style"),
+        Output("scatter_container","style"),
         Input("track_width", "value"),
         Input("track_height", "value"),
         Input("main_width","value"),
@@ -510,9 +608,11 @@ def register_callbacks(app: dash.Dash) -> None:
         Input("ts_height","value"),
         Input("profile_width","value"),
         Input("profile_height","value"),
+        Input("scatter_width","value"),
+        Input("scatter_height","value"),
         prevent_initial_call=True
     )
-    def apply_manual_layout(trw, trh, mw, mh, tsw, tsh, pw, ph):
+    def apply_manual_layout(trw, trh, mw, mh, tsw, tsh, pw, ph, sw, sh):
         def style(w, h):
             out = {}
             if w is not None:
@@ -524,7 +624,8 @@ def register_callbacks(app: dash.Dash) -> None:
             style(trw, trh),
             style(mw, mh),
             style(tsw, tsh),
-            style(pw, ph)
+            style(pw, ph),
+            style(sw, sh)
         )
         
     # ============================================================
@@ -643,96 +744,86 @@ def register_callbacks(app: dash.Dash) -> None:
             return {"mode": "all", "selected_ids": None, "_key": this_key}
         raise dash.exceptions.PreventUpdate
 
-    # --- Callback: Mirror selections between main scatter and TS plots ---
-    @app.callback(
-        Output("main_plot", "figure", allow_duplicate=True),
-        Output("ts_plot", "figure", allow_duplicate=True),
-        Input("main_plot", "selectedData"),
-        Input("ts_plot", "selectedData"),
-        State("main_plot_point_ids", "data"),
-        State("ts_plot_point_ids", "data"),
-        prevent_initial_call=True
-    )
-    def mirror_selection(scatter_sel, ts_sel, scatter_point_ids, ts_point_ids):
-        trigger = ctx.triggered_id
-        patched_scatter = Patch()
-        patched_ts = Patch()
-        # --- Detect clearing ---
-        if trigger == "main_plot" and not scatter_sel:
-            for i, _ in enumerate(ts_point_ids or []):
-                patched_ts["data"][i]["selectedpoints"] = None
-            for i, _ in enumerate(scatter_point_ids or []):
-                patched_scatter["data"][i]["selectedpoints"] = None
-            return patched_scatter, patched_ts
-        if trigger == "ts_plot" and not ts_sel:
-            for i, _ in enumerate(scatter_point_ids or []):
-                patched_scatter["data"][i]["selectedpoints"] = None
-            for i, _ in enumerate(ts_point_ids or []):
-                patched_ts["data"][i]["selectedpoints"] = None
-            return patched_scatter, patched_ts
-        # --- Collect selected IDs ---
-        selected_ids = set()
-        if trigger == "main_plot" and scatter_sel and scatter_sel.get("points"):
-            selected_ids = {
-                point_id
-                for p in scatter_sel["points"]
-                for point_id in [get_point_id_from_event_point(p, scatter_point_ids)]
-                if point_id is not None
-            }
-        elif trigger == "ts_plot" and ts_sel and ts_sel.get("points"):
-            selected_ids = {
-                point_id
-                for p in ts_sel["points"]
-                for point_id in [get_point_id_from_event_point(p, ts_point_ids)]
-                if point_id is not None
-            }
-        # --- Apply selection to both figures ---
-        ids = np.asarray(list(selected_ids), dtype=np.int32)
-        for trace_point_ids, patch in [
-            (scatter_point_ids, patched_scatter),
-            (ts_point_ids, patched_ts),
-        ]:
-            for i, custom_ids in enumerate(trace_point_ids or []):
-                if not custom_ids:
-                    continue
-                mask = np.isin(custom_ids, ids)
-                selected_idx = np.nonzero(mask)[0]
-                patch["data"][i]["selectedpoints"] = (
-                    selected_idx.tolist() if len(selected_idx) else []
-                )
-        return patched_scatter, patched_ts
+    # Plots whose box/lasso selections are mirrored onto each other and
+    # drive the profile plot.
+    linked_plots = ("main_plot", "ts_plot", "scatter_plot")
 
-    # --- Callback: Store selected IDs from either scatter plot for profiles ---
-    @app.callback(
-        Output('main_plot_selected_data', 'data'),
-        Input('main_plot', 'selectedData'),
-        Input('ts_plot', 'selectedData'),
-        State('main_plot_point_ids', 'data'),
-        State('ts_plot_point_ids', 'data'),
-        prevent_initial_call=True
-    )
-    def store_scatter_selection_indices(
-        main_selected_data,
-        ts_selected_data,
-        main_point_ids,
-        ts_point_ids,
-    ):
-        """Store IDs selected in the main or T-S scatter plot."""
-        if ctx.triggered_id == "ts_plot":
-            selected_data = ts_selected_data
-            point_ids = ts_point_ids
-        else:
-            selected_data = main_selected_data
-            point_ids = main_point_ids
-        if not selected_data or "points" not in selected_data:
-            return None
-        selected_ids = [
+    def _selected_point_ids(selected_data, point_ids):
+        return {
             point_id
             for p in selected_data["points"]
             for point_id in [get_point_id_from_event_point(p, point_ids)]
             if point_id is not None
-        ]
-        return {"selected_ids": selected_ids}
+        }
+
+    # --- Callback: Mirror selections between the transect, T-S and scatter
+    # plots, and store the selection for the profile, fit and redraws ---
+    # One callback does both: as separate callbacks they raced. Patching the
+    # other plots removes their old boxes, Plotly then reports "0 points" for
+    # them, and Dash discarded the still-pending store update for the new box.
+    @app.callback(
+        [Output(g, "figure", allow_duplicate=True) for g in linked_plots]
+        + [Output('main_plot_selected_data', 'data')],
+        [Input(g, "selectedData") for g in linked_plots],
+        [State(f"{g}_point_ids", "data") for g in linked_plots],
+        State('x_axis_variable', 'value'),
+        State('y_axis_variable', 'value'),
+        State('scatter_x', 'value'),
+        State('scatter_y', 'value'),
+        prevent_initial_call=True
+    )
+    def mirror_selection(*args):
+        n = len(linked_plots)
+        selections = dict(zip(linked_plots, args[:n]))
+        point_ids = dict(zip(linked_plots, args[n:2 * n]))
+        main_x, main_y, scatter_x, scatter_y = args[2 * n:]
+        axes = {
+            "main_plot": f"{main_x}/{main_y}",
+            "ts_plot": "salinity/temperature",
+            "scatter_plot": f"{scatter_x}/{scatter_y}",
+        }
+        trigger = ctx.triggered_id if ctx.triggered_id in linked_plots else "main_plot"
+        patches = {g: Patch() for g in linked_plots}
+        trigger_sel = selections.get(trigger)
+        # --- Detect clearing (double-click deselect) ---
+        if not trigger_sel:
+            for g in linked_plots:
+                for i, _ in enumerate(point_ids[g] or []):
+                    patches[g]["data"][i]["selectedpoints"] = None
+            return [patches[g] for g in linked_plots] + [None]
+        # An empty selection is either a box over no data or Plotly reporting
+        # a box removed below; neither should replace the current selection.
+        if not trigger_sel.get("points"):
+            raise dash.exceptions.PreventUpdate
+        # --- Latest selection wins: drop the drawn boxes on the other plots ---
+        # Plotly keeps user-drawn boxes across redraws (uirevision) and would
+        # re-apply them, so a new selectionrevision is needed to discard them.
+        revision = f"{trigger}-{time.monotonic_ns()}"
+        for g in linked_plots:
+            if g != trigger:
+                patches[g]["layout"]["selections"] = []
+                patches[g]["layout"]["selectionrevision"] = revision
+        # --- Apply selection to every linked figure ---
+        selected_ids = _selected_point_ids(trigger_sel, point_ids[trigger])
+        ids = np.asarray(list(selected_ids), dtype=np.int32)
+        for g in linked_plots:
+            for i, custom_ids in enumerate(point_ids[g] or []):
+                if not custom_ids:
+                    continue
+                mask = np.isin(custom_ids, ids)
+                selected_idx = np.nonzero(mask)[0]
+                patches[g]["data"][i]["selectedpoints"] = (
+                    selected_idx.tolist() if len(selected_idx) else []
+                )
+        # Stored for the profile and fit, plus the drawn box/lasso so the
+        # source plot can keep it when it redraws.
+        stored = {
+            "selected_ids": list(selected_ids),
+            "source": trigger,
+            "axes": axes[trigger],
+            "selections": selection_shapes(trigger_sel),
+        }
+        return [patches[g] for g in linked_plots] + [stored]
 
     # --- Callback: Download CSV file ---
     @app.callback(
@@ -836,14 +927,15 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('station', 'value'),
             Input('cruise_track_selection_store', 'data'),
             Input('main_plot', 'relayoutData'),
-        ]
+        ],
+        State('main_plot_selected_data', 'data'),
     )
     def update_main_plot(
         dataset, csv_file, sub_sample, sampling_mode,
         x_axis, y_axis, color_var, color_map, size,
         vmin, vmax, zmin, zmax, latmin, latmax, lonmin, lonmax,
         hidden_opacity, fontsize, bathymetry, station,
-        cruise_track_selection, relayoutData
+        cruise_track_selection, relayoutData, selection
     ):
         # ------------------------------------------------------------------
         # 1. Ignore irrelevant relayout events
@@ -925,6 +1017,22 @@ def register_callbacks(app: dash.Dash) -> None:
                 vmax = q[0.95] if vmax is None else vmax
         else:
             palette_type = "discrete"
+        # Only the colormap or color range changed: patch the shared color
+        # axis instead of rebuilding (keeps zoom/selection, much less data).
+        # Discrete coloring uses one trace per class, so it still rebuilds.
+        color_only = {"color_map", "v_min", "v_max"}
+        triggered = {prop.split(".")[0] for prop in ctx.triggered_prop_ids}
+        if color_mode == "continuous" and triggered and triggered <= color_only:
+            patched = Patch()
+            # A Patch bypasses plotly.py's validation, so send the [[pos, color]]
+            # pairs Plotly.js expects rather than a bare list of colors.
+            steps = max(len(palette) - 1, 1)
+            patched["layout"]["coloraxis"]["colorscale"] = [
+                [i / steps, color] for i, color in enumerate(palette)
+            ]
+            patched["layout"]["coloraxis"]["cmin"] = None if vmin is None else float(vmin)
+            patched["layout"]["coloraxis"]["cmax"] = None if vmax is None else float(vmax)
+            return patched
         fig = go.Figure()
         # ------------------------------------------------------------------
         # 5. Add scatter traces
@@ -943,12 +1051,13 @@ def register_callbacks(app: dash.Dash) -> None:
                         cmax=vmax,
                         coloraxis="coloraxis"
                     ),
-                    customdata=df["point_id"].astype(np.int32).to_numpy().tolist(),
+                    customdata=df["point_id"].astype(np.int32).to_numpy(),
                     hovertemplate=(
                         f"{x_axis.capitalize()}: %{{x:.2f}}<br>"
                         f"{y_axis.capitalize()}: %{{y:.2f}}<br>"
                         f"{color_var.replace('_', ' ').capitalize()}: "
                         "%{marker.color:.2f}"
+                        "<extra></extra>"
                     ),
                     showlegend=False,
                 )
@@ -1049,13 +1158,23 @@ def register_callbacks(app: dash.Dash) -> None:
             "latitude": (latmin, latmax),
             "longitude": (lonmin, lonmax),
         }
+
+        def padded(lo, hi, frac=0.02):
+            # Margin so Scattergl markers on the edges aren't clipped by the
+            # axis border; ticks stay computed from the unpadded range.
+            pad = (hi - lo) * frac
+            return lo - pad, hi + pad
+
+        def has_limits(var):
+            lo, hi = coord_limits.get(var, (None, None))
+            return lo is not None and hi is not None
         # -------------------------
         # X axis
         # -------------------------
         xticks = None
         xticktext = None
         if x_axis == "times":
-            x_range = [df["times"].min(), df["times"].max()]
+            x_range = list(padded(df["times"].min(), df["times"].max()))
         elif x_axis in df.columns:
             xmin, xmax = resolve_range(
                 visible_xrange,
@@ -1063,9 +1182,13 @@ def register_callbacks(app: dash.Dash) -> None:
                 *coord_limits.get(x_axis, (None, None))
             )
             xticks, digits = dynamic_ticks(xmin, xmax, nticks=6)
-            x_range = [xmin, xmax]
+            if visible_xrange is None and not has_limits(x_axis):
+                x_lo, x_hi = padded(xmin, xmax)
+            else:
+                x_lo, x_hi = xmin, xmax
+            x_range = [x_lo, x_hi]
             if x_axis == "latitude":
-                x_range = [xmax, xmin]
+                x_range = [x_hi, x_lo]
                 xticktext = [
                     f"{abs(v):.{digits}f}°{'N' if v >= 0 else 'S'}"
                     for v in xticks
@@ -1087,21 +1210,29 @@ def register_callbacks(app: dash.Dash) -> None:
         ylabel = y_axis.capitalize()
         if y_axis in df.columns:
             if y_axis == "depth":
-                ymin, ymax = resolve_range(
-                    visible_yrange,
-                    df[y_axis],
-                    zmin,
-                    zmax
-                )
+                if visible_yrange is not None:
+                    ymin, ymax = min(visible_yrange), max(visible_yrange)
+                else:
+                    # Min/Max Depth are optional: a blank one uses the data's
+                    # extent, and either order works (0-200 or 200-0).
+                    depth = pd.to_numeric(df[y_axis], errors="coerce")
+                    lo = depth.min() if zmin is None else zmin
+                    hi = depth.max() if zmax is None else zmax
+                    ymin, ymax = min(lo, hi), max(lo, hi)
                 ylabel = "Depth (m)"
-                y_range = [ymax, ymin]
+                # Min/Max Depth stay the limits, with room for points at them.
+                y_lo, y_hi = (ymin, ymax) if visible_yrange else padded(ymin, ymax)
+                y_range = [y_hi, y_lo]
             else:
                 ymin, ymax = resolve_range(
                     visible_yrange,
                     df[y_axis],
                     *coord_limits.get(y_axis, (None, None))
                 )
-                y_range = [ymin, ymax]
+                if visible_yrange is None and not has_limits(y_axis):
+                    y_range = list(padded(ymin, ymax))
+                else:
+                    y_range = [ymin, ymax]
             if y_axis in ["latitude", "longitude"]:
                 yticks, digits = dynamic_ticks(ymin, ymax, nticks=6)
                 if y_axis == "latitude":
@@ -1211,7 +1342,7 @@ def register_callbacks(app: dash.Dash) -> None:
                     ticks="outside",
                     ticklabelposition="outside bottom",
                     tickmode="auto",
-                    nticks=5,
+                    nticks=10,
                 ),
                 colorscale=palette,
                 cmin=vmin,
@@ -1289,7 +1420,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 annotations=station_labels,
                 shapes=station_lines
             )
-        return fig
+        return apply_selection(fig, selection, "main_plot", f"{x_axis}/{y_axis}")
     # ============================================================
     # === Time–Salinity (T–S) Diagram Update ===
     # ============================================================
@@ -1308,11 +1439,12 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('hidden_opacity', 'value'),
             Input('plot_font_size', 'value'),
             Input('cruise_track_selection_store', 'data'),
-        ]
+        ],
+        State('main_plot_selected_data', 'data'),
     )
     def update_ts_plot(dataset, csv_file, sub_sample, sampling_mode,
                     color_var, color_map, size, vmin, vmax,
-                    hidden_opacity, fontsize, cruise_track_selection):
+                    hidden_opacity, fontsize, cruise_track_selection, selection):
         # --------------------------------------------------------
         # 1️⃣ Load Data
         # --------------------------------------------------------
@@ -1321,7 +1453,10 @@ def register_callbacks(app: dash.Dash) -> None:
                 text="⚠️ No CSV found", x=0.5, y=0.5, showarrow=False
             )
         df = data.load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
-        if 'temperature' not in df.columns or 'salinity' not in df.columns:
+        # Temperature/salinity under whatever name the file uses (t090c, sal00, ...).
+        temp_col = find_alias(df.columns, "temperature")
+        sal_col = find_alias(df.columns, "salinity")
+        if temp_col is None or sal_col is None:
             return go.Figure().add_annotation(
                 text="⚠️ Temperature or Salinity data missing",
                 x=0.5, y=0.5, xref="paper", yref="paper",
@@ -1356,8 +1491,8 @@ def register_callbacks(app: dash.Dash) -> None:
         # --------------------------------------------------------
         # 4️⃣ Compute Density Contours (σθ)
         # --------------------------------------------------------
-        tmin, tmax = df['temperature'].quantile([0.01, 0.99]).round().astype(int)
-        smin, smax = df['salinity'].quantile([0.01, 0.99]).round().astype(int)
+        tmin, tmax = df[temp_col].quantile([0.01, 0.99]).round().astype(int)
+        smin, smax = df[sal_col].quantile([0.01, 0.99]).round().astype(int)
         tmin -= 2
         tmax += 2
         smin -= 2
@@ -1380,7 +1515,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 vmin = q[0.05] if vmin is None else vmin
                 vmax = q[0.95] if vmax is None else vmax
             marker_color = numeric_color
-            customdata = df["point_id"].astype(np.int32).to_numpy().tolist()
+            customdata = df["point_id"].astype(np.int32).to_numpy()
             hovertemplate = (
                 "Salinity: %{x:.2f}<br>"
                 "Temperature: %{y:.2f} °C<br>"
@@ -1434,8 +1569,8 @@ def register_callbacks(app: dash.Dash) -> None:
         fig = go.Figure()
         fig.add_trace(
             go.Scattergl(
-                x=df['salinity'],
-                y=df['temperature'],
+                x=df[sal_col],
+                y=df[temp_col],
                 mode="markers",
                 marker=dict(
                     size=size,
@@ -1540,33 +1675,308 @@ def register_callbacks(app: dash.Dash) -> None:
                     ticktext=categories,
                 )
             )
-        return fig
+        return apply_selection(fig, selection, "ts_plot", "salinity/temperature")
+
+    # ============================================================
+    # === Scatter Plot with Polynomial Fit ===
+    # ============================================================
+    def _scatter_frame(dataset, csv_file, sub_sample, sampling_mode, cruise_track_selection):
+        """Load data and apply the cruise-track filter, as the other plots do."""
+        df = data.load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
+        if (
+            cruise_track_selection
+            and cruise_track_selection.get("mode") != "all"
+            and cruise_track_selection.get("selected_ids") is not None
+        ):
+            ids = np.asarray(cruise_track_selection["selected_ids"], dtype=np.int32)
+            df = df.loc[np.isin(df["point_id"].to_numpy(), ids)]
+        return df
+
+    def _fit_subset(df, fit_on, selection):
+        """Rows used for the fit and a note on which data that is.
+
+        fit_on is the "On selected" tick box: empty fits every point shown
+        (after the cruise-track filter), ticked fits the current selection
+        from any linked plot.
+        """
+        if not fit_on:
+            return df, "Fitted on all points shown (cruise-track filter applied)."
+        if selection and selection.get("selected_ids"):
+            ids = np.asarray(selection["selected_ids"], dtype=np.int32)
+            return df.loc[np.isin(df["point_id"].to_numpy(), ids)], "Fitted on selected points."
+        return df, "Nothing selected yet; fitted on all points shown."
+
+    def _axis_label(var):
+        unit = get_unit(var)
+        label = var.replace("_", " ").capitalize()
+        return f"{label} ({unit})" if unit else label
+
+    def _polynomial_fit(df, x_var, y_var, degree):
+        if x_var not in df.columns or y_var not in df.columns:
+            return None
+        return polynomial_fit(
+            pd.to_numeric(df[x_var], errors="coerce"),
+            pd.to_numeric(df[y_var], errors="coerce"),
+            degree,
+        )
+
+    def _fit_summary(fit, x_var, y_var, basis_note):
+        """Equation, R², n and RMSE for the panel beside the scatter plot."""
+        if fit is None:
+            return html.Div("No fit. Choose a degree under Fit.", className='fit-note')
+        title = {1: "Linear fit", 2: "2nd order fit", 3: "3rd order fit"}.get(
+            fit["degree"], f"Polynomial fit (degree {fit['degree']})"
+        )
+        if "error" in fit:
+            return [html.Div(title, className='fit-title'),
+                    html.Div(f"{fit['error']} (n = {fit['n']:,})", className='fit-note')]
+        superscripts = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+        terms = []
+        for power in range(len(fit["coef"]) - 1, -1, -1):
+            c = fit["coef"][power]
+            sign = "−" if c < 0 else "+"
+            x_part = "" if power == 0 else ("·x" if power == 1 else "·x" + str(power).translate(superscripts))
+            terms.append((sign, f"{abs(c):.4g}{x_part}"))
+        first_sign, first_term = terms[0]
+        lines = [f"y = {'−' if first_sign == '−' else ''}{first_term}"]
+        lines += [f"    {sign} {term}" for sign, term in terms[1:]]
+        return [
+            html.Div(title, className='fit-title'),
+            html.Pre("\n".join(lines), className='fit-equation'),
+            html.Div(f"R² = {fit['r2']:.4f}"),
+            html.Div(f"RMSE = {fit['rmse']:.4g}"),
+            html.Div(f"n = {fit['n']:,}"),
+            html.Div(
+                [html.Div(f"x = {_axis_label(x_var)}"), html.Div(f"y = {_axis_label(y_var)}")],
+                className='fit-note',
+            ),
+            html.Div(basis_note, className='fit-note'),
+        ]
+
+    def _fit_shapes(fit, color="#d62728"):
+        """Fit curve as a layout shape; unlike a trace, box/lasso selections
+        don't dim it."""
+        if fit is None or "error" in fit:
+            return []
+        path = "M " + " L ".join(
+            f"{x:.10g},{y:.10g}" for x, y in zip(fit["curve_x"], fit["curve_y"])
+        )
+        return [dict(
+            type="path", path=path, xref="x", yref="y",
+            line=dict(color=color or "#d62728", width=2), layer="above",
+        )]
+
+    @app.callback(
+        Output('scatter_plot', 'figure'),
+        Output('scatter_fit_summary', 'children'),
+        Input('dataset_selector', 'value'),
+        Input('csv_selector', 'value'),
+        Input('sub_sample', 'value'),
+        Input('sampling_mode', 'value'),
+        Input('scatter_x', 'value'),
+        Input('scatter_y', 'value'),
+        Input('scatter_color', 'value'),
+        Input('scatter_color_map', 'value'),
+        Input('size', 'value'),
+        Input('scatter_v_min', 'value'),
+        Input('scatter_v_max', 'value'),
+        Input('scatter_x_min', 'value'),
+        Input('scatter_x_max', 'value'),
+        Input('scatter_y_min', 'value'),
+        Input('scatter_y_max', 'value'),
+        Input('scatter_fit_degree', 'value'),
+        Input('hidden_opacity', 'value'),
+        Input('plot_font_size', 'value'),
+        Input('cruise_track_selection_store', 'data'),
+        State('scatter_fit_selected', 'value'),
+        State('main_plot_selected_data', 'data'),
+        State('scatter_fit_color', 'value'),
+    )
+    def update_scatter_plot(dataset, csv_file, sub_sample, sampling_mode,
+                            x_var, y_var, color_var, color_map, size, vmin, vmax,
+                            x_min, x_max, y_min, y_max, degree,
+                            hidden_opacity, fontsize, cruise_track_selection,
+                            fit_on, selection, fit_color):
+        def message(text):
+            fig = go.Figure().add_annotation(
+                text=text, x=0.5, y=0.5, xref="paper", yref="paper",
+                showarrow=False, font=dict(size=16, color="red")
+            )
+            return fig, None
+
+        if not csv_file:
+            return message("⚠️ No CSV found")
+        df = _scatter_frame(dataset, csv_file, sub_sample, sampling_mode, cruise_track_selection)
+        if not x_var or not y_var or x_var not in df.columns or y_var not in df.columns:
+            return message("Choose X and Y variables")
+        df = df[df[x_var].notna() & df[y_var].notna()]
+        if df.empty:
+            return message(f"⚠️ No data with both {x_var} and {y_var}")
+
+        hovertemplate = (
+            f"{_axis_label(x_var)}: %{{x:.4g}}<br>"
+            f"{_axis_label(y_var)}: %{{y:.4g}}"
+        )
+        marker = dict(size=size)
+        coloraxis = None
+        if color_var and color_var != "none" and color_var in df.columns:
+            color_values = pd.to_numeric(df[color_var], errors="coerce")
+            if vmin is None or vmax is None:
+                q = color_values.dropna().quantile([0.05, 0.95])
+                vmin = q[0.05] if vmin is None else vmin
+                vmax = q[0.95] if vmax is None else vmax
+            palette, _ = get_palette(color_map or "Viridis")
+            marker.update(color=color_values, coloraxis="coloraxis")
+            coloraxis = dict(
+                colorscale=palette, cmin=vmin, cmax=vmax,
+                # Horizontal under the plot, like the T-S colorbar.
+                colorbar=dict(
+                    title=dict(text=_axis_label(color_var), side="bottom"),
+                    orientation="h",
+                    x=0.5,
+                    xanchor="center",
+                    y=0,
+                    yanchor="top",
+                    ypad=70,
+                    lenmode="fraction",
+                    len=0.75,
+                    thickness=15,
+                    ticks="outside",
+                    ticklabelposition="outside bottom",
+                    tickmode="auto",
+                    nticks=8,
+                ),
+            )
+            hovertemplate += f"<br>{_axis_label(color_var)}: %{{marker.color:.4g}}"
+        else:
+            marker.update(color="#1f77b4")
+        hovertemplate += "<extra></extra>"
+
+        fit_df, basis_note = _fit_subset(df, fit_on, selection)
+        fit = _polynomial_fit(fit_df, x_var, y_var, degree)
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scattergl(
+                x=df[x_var],
+                y=df[y_var],
+                mode="markers",
+                marker=marker,
+                customdata=df["point_id"].astype(np.int32).to_numpy(),
+                selected=dict(marker=dict(opacity=1)),
+                unselected=dict(marker=dict(opacity=hidden_opacity)),
+                hovertemplate=hovertemplate,
+                showlegend=False,
+            )
+        )
+
+        def axis(title, lo, hi):
+            out = dict(
+                title=title, showgrid=True, gridcolor='rgba(0, 0, 0, 0.1)',
+                showline=True, linecolor='black', mirror=True, ticks='outside',
+            )
+            if lo is not None and hi is not None:
+                out["range"] = [lo, hi]
+            return out
+
+        fig.update_layout(
+            dragmode="zoom",
+            uirevision=f"{dataset}/{csv_file}/{x_var}/{y_var}",
+            font=dict(size=fontsize or 14, color='black'),
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            margin=dict(l=70, r=20, t=20, b=60),
+            xaxis=axis(_axis_label(x_var), x_min, x_max),
+            yaxis=axis(_axis_label(y_var), y_min, y_max),
+            shapes=_fit_shapes(fit, fit_color),
+        )
+        if coloraxis:
+            fig.update_layout(coloraxis=coloraxis)
+        return apply_selection(fig, selection, "scatter_plot", f"{x_var}/{y_var}"), _fit_summary(fit, x_var, y_var, basis_note)
+
+    # --- Callback: Refit when the selection, "On selected" or line color changes ---
+    # Only the curve shape and summary are patched, so the point selection
+    # highlighted in the scatter plot is kept.
+    @app.callback(
+        Output('scatter_plot', 'figure', allow_duplicate=True),
+        Output('scatter_fit_summary', 'children', allow_duplicate=True),
+        Input('main_plot_selected_data', 'data'),
+        Input('scatter_fit_selected', 'value'),
+        Input('scatter_fit_color', 'value'),
+        State('dataset_selector', 'value'),
+        State('csv_selector', 'value'),
+        State('sub_sample', 'value'),
+        State('sampling_mode', 'value'),
+        State('scatter_x', 'value'),
+        State('scatter_y', 'value'),
+        State('scatter_fit_degree', 'value'),
+        State('cruise_track_selection_store', 'data'),
+        prevent_initial_call=True
+    )
+    def refit_scatter_selection(selection, fit_on, fit_color, dataset, csv_file, sub_sample,
+                                sampling_mode, x_var, y_var, degree, cruise_track_selection):
+        if ctx.triggered_id == 'main_plot_selected_data' and not fit_on:
+            raise dash.exceptions.PreventUpdate
+        if not csv_file or not x_var or not y_var:
+            raise dash.exceptions.PreventUpdate
+        df = _scatter_frame(dataset, csv_file, sub_sample, sampling_mode, cruise_track_selection)
+        fit_df, basis_note = _fit_subset(df, fit_on, selection)
+        fit = _polynomial_fit(fit_df, x_var, y_var, degree)
+        patched = Patch()
+        patched["layout"]["shapes"] = _fit_shapes(fit, fit_color)
+        return patched, _fit_summary(fit, x_var, y_var, basis_note)
 
     # ============================================================
     # === Vertical Profile Plot Update (Depth vs. Variable) ===
     # ============================================================
+    def _cast_style(cast_id, focus_cast):
+        """Line style of one cast: bold when it is the Details point's cast,
+        faded when another cast is in focus."""
+        is_focus = focus_cast is not None and int(cast_id) == focus_cast
+        faded = focus_cast is not None and not is_focus
+        return dict(
+            width=3.5 if is_focus else (1.5 if faded else 2),
+            marker_size=5 if is_focus else 4,
+            opacity=0.35 if faded else 1,
+            name=f"Cast {int(cast_id)} (clicked)" if is_focus else f"Cast {int(cast_id)}",
+        )
+
     @app.callback(
         Output('profile_plot', 'figure'),
+        Output('profile_state', 'data'),
         [
             Input('dataset_selector', 'value'),
             Input('csv_selector', 'value'),
             Input('sub_sample', 'value'),
             Input('sampling_mode', 'value'),
-            Input('profile_variable', 'value'),   
+            Input('profile_variable', 'value'),
             Input('profile_color_map', 'value'),
-            Input('plot_font_size', 'value'),   
+            Input('plot_font_size', 'value'),
             Input('main_plot_selected_data', 'data'),
             Input('cruise_track_selection_store', 'data'),
-        ]
+            Input('detail_point_id', 'data'),
+            Input('detail_marker', 'value'),
+            Input('detail_marker_color', 'value'),
+        ],
+        State('profile_state', 'data'),
     )
-    def update_profile_plot(dataset, csv_file, sub_sample, sampling_mode,
-                            color_var, color_map, fontsize,
-                            selected_data, cruise_track_selection):
+    def update_profile_plot(*args):
+        result = _profile_figure(*args)
+        return result if isinstance(result, tuple) else (result, None)
+
+    def _profile_figure(dataset, csv_file, sub_sample, sampling_mode,
+                        color_var, color_map, fontsize,
+                        selected_data, cruise_track_selection,
+                        focus_id, show_marker, marker_color, prev_state):
         """
         Update the vertical profile plot.
         Behavior:
             - Cruise track selection is applied first.
             - Main-plot selection expands to full casts when cast exists.
+            - The Details point (click or Prev/Next) adds its cast in bold on
+              top of the selected casts, which fade; a dot marks its depth
+              when the Details "Marker" box is ticked. The box selection
+              itself is never changed by a click.
             - If cast exists, plot each cast as a separate profile.
             - Profile colors always use qualitative palettes.
             - If cast does not exist, plot a median profile with percentile envelope.
@@ -1601,6 +2011,23 @@ def register_callbacks(app: dash.Dash) -> None:
             ids = np.asarray(cruise_track_selection["selected_ids"], dtype=np.int32)
             mask = np.isin(df["point_id"].to_numpy(), ids)
             df = df.loc[mask]
+        # --- Details point: its row and cast (if the file has casts) ---
+        # With the point marker off, the clicked point doesn't affect the
+        # profile at all (no bold cast, no dot), so unticking clears it.
+        focus_row = None
+        focus_cast = None
+        if focus_id is not None and show_marker:
+            matches = df.loc[df["point_id"] == focus_id]
+            if not matches.empty:
+                focus_row = matches.iloc[0]
+                if "cast" in df.columns:
+                    cast_value = pd.to_numeric(focus_row["cast"], errors="coerce")
+                    if pd.notna(cast_value):
+                        focus_cast = int(round(cast_value))
+        cast_numbers = (
+            pd.to_numeric(df["cast"], errors="coerce").round()
+            if "cast" in df.columns else None
+        )
         selected_ids = None
         if isinstance(selected_data, dict):
             selected_ids = selected_data.get("selected_ids")
@@ -1609,16 +2036,20 @@ def register_callbacks(app: dash.Dash) -> None:
             ids = np.asarray(selected_ids, dtype=np.int32)
             if "cast" in df.columns:
                 mask = np.isin(df["point_id"].to_numpy(), ids)
-                selected_casts = df.loc[mask, "cast"].dropna().unique()
-                if len(selected_casts) > 0:
-                    cast_mask = np.isin(df["cast"].to_numpy(), selected_casts)
-                    df = df.loc[cast_mask]
+                selected_casts = set(cast_numbers[mask].dropna().astype(int))
+                if focus_cast is not None:
+                    selected_casts.add(focus_cast)
+                if selected_casts:
+                    df = df.loc[cast_numbers.isin(selected_casts)]
             else:
                 mask = np.isin(df["point_id"].to_numpy(), ids)
                 df = df.loc[mask]
+        elif focus_cast is not None and not has_cruise_selection:
+            # Only a clicked point: show its whole cast.
+            df = df.loc[cast_numbers == focus_cast]
         elif not has_cruise_selection:
             fig.add_annotation(
-                text="Select points in the main or T-S plot to show profiles",
+                text="Select or click points to show profiles",
                 x=0.5,
                 y=0.5,
                 xref="paper",
@@ -1686,17 +2117,48 @@ def register_callbacks(app: dash.Dash) -> None:
                 cast_id: palette[i % len(palette)]
                 for i, cast_id in enumerate(unique_casts)
             }
+            casts = [int(c) for c in unique_casts]
+            shown_focus = focus_cast if focus_cast in casts else None
+            # Dot at the Details point's depth: always the trace after the casts.
+            dot_x, dot_y = [], []
+            if focus_row is not None:
+                fx = pd.to_numeric(focus_row.get(color_var), errors="coerce")
+                fy = pd.to_numeric(focus_row.get("depth"), errors="coerce")
+                if pd.notna(fx) and pd.notna(fy):
+                    dot_x, dot_y = [float(fx)], [float(fy)]
+            state = {"key": [dataset, csv_file, sub_sample, sampling_mode,
+                             color_var, color_map, fontsize, casts]}
+            # Only the Details point / marker changed and the same casts are
+            # drawn: restyle in place instead of rebuilding every cast trace.
+            point_only = {"detail_point_id", "detail_marker", "detail_marker_color"}
+            triggered = {prop.split(".")[0] for prop in ctx.triggered_prop_ids}
+            if triggered and triggered <= point_only and prev_state == state:
+                patched = Patch()
+                for i, cast_id in enumerate(casts):
+                    style = _cast_style(cast_id, shown_focus)
+                    patched["data"][i]["line"]["width"] = style["width"]
+                    patched["data"][i]["marker"]["size"] = style["marker_size"]
+                    patched["data"][i]["opacity"] = style["opacity"]
+                    patched["data"][i]["name"] = style["name"]
+                patched["data"][len(casts)]["x"] = dot_x
+                patched["data"][len(casts)]["y"] = dot_y
+                patched["data"][len(casts)]["marker"]["line"]["color"] = marker_color or "#e00000"
+                return patched, no_update
+            # Casts in numeric order so each keeps its trace index for patching;
+            # faded casts are see-through, so the bold one stays visible.
             for cast_id, g in df.groupby("cast", dropna=True):
                 g = g.sort_values("depth")
                 color = cast_colors.get(cast_id, "rgba(0,0,0,0.6)")
+                style = _cast_style(cast_id, shown_focus)
                 fig.add_trace(
                     go.Scattergl(
                         x=g[color_var],
                         y=g["depth"],
                         mode="lines+markers",
-                        line=dict(color=color, width=2),
-                        marker=dict(size=4, color=color),
-                        name=f"Cast {int(cast_id)}",
+                        line=dict(color=color, width=style["width"]),
+                        marker=dict(size=style["marker_size"], color=color),
+                        opacity=style["opacity"],
+                        name=style["name"],
                         customdata=np.c_[g["latitude"], g["longitude"]],
                         hovertemplate=(
                             f"<b>Cast:</b> {int(cast_id)}<br>"
@@ -1709,7 +2171,22 @@ def register_callbacks(app: dash.Dash) -> None:
                         ),
                     )
                 )
+            fig.add_trace(
+                go.Scatter(
+                    x=dot_x,
+                    y=dot_y,
+                    mode="markers",
+                    marker=dict(
+                        size=14,
+                        color="rgba(0,0,0,0)",
+                        line=dict(color=marker_color or "#e00000", width=2.5),
+                    ),
+                    hoverinfo="skip",
+                    showlegend=False,
+                )
+            )
         else:
+            state = None
             step = 2
             depth_bin = np.floor((df["depth"] + step / 2) / step) * step
             summary = (
@@ -1756,6 +2233,26 @@ def register_callbacks(app: dash.Dash) -> None:
                     ),
                 )
             )
+        # Ring at the Details point's depth (median-profile mode; cast mode
+        # adds it above as a fixed trace).
+        if state is None and show_marker and focus_row is not None:
+            focus_x = pd.to_numeric(focus_row.get(color_var), errors="coerce")
+            focus_depth = pd.to_numeric(focus_row.get("depth"), errors="coerce")
+            if pd.notna(focus_x) and pd.notna(focus_depth):
+                fig.add_trace(
+                    go.Scatter(
+                        x=[focus_x],
+                        y=[focus_depth],
+                        mode="markers",
+                        marker=dict(
+                            size=14,
+                            color="rgba(0,0,0,0)",
+                            line=dict(color=marker_color or "#e00000", width=2.5),
+                        ),
+                        hoverinfo="skip",
+                        showlegend=False,
+                    )
+                )
         fig.update_layout(
             dragmode="zoom",
             paper_bgcolor="white",
@@ -1791,34 +2288,96 @@ def register_callbacks(app: dash.Dash) -> None:
             tickwidth=1,
             tickcolor="black",
         )
-        return fig
+        return fig, state
 
-    # ============================================================s
-    # === Display Clicked Point Details (from Main Plot) ===
+    # ============================================================
+    # === Point Details: click a point, then step with Prev/Next ===
     # ============================================================
     @app.callback(
-        Output('click-output', 'children'),
+        Output('detail_point_id', 'data'),
         Input('main_plot', 'clickData'),
+        Input('ts_plot', 'clickData'),
+        Input('scatter_plot', 'clickData'),
+        Input('detail-prev', 'n_clicks'),
+        Input('detail-next', 'n_clicks'),
+        Input('csv_selector', 'value'),
         State('main_plot_point_ids', 'data'),
+        State('ts_plot_point_ids', 'data'),
+        State('scatter_plot_point_ids', 'data'),
+        State('detail_point_id', 'data'),
+        State('dataset_selector', 'value'),
+        State('sub_sample', 'value'),
+        State('sampling_mode', 'value'),
+        State('cruise_track_selection_store', 'data'),
+        prevent_initial_call=True
+    )
+    def select_detail_point(main_click, ts_click, scatter_click, _prev, _next, csv_file,
+                            main_point_ids, ts_point_ids, scatter_point_ids, current_id,
+                            dataset, sub_sample, sampling_mode, cruise_track_selection):
+        """Point shown in Details: the clicked point, or its neighbour in time
+        among the rows the plots show (sampling and cruise-track filter applied)."""
+        trigger = ctx.triggered_id
+        if trigger == "csv_selector":
+            return None
+        clicks = {
+            "main_plot": (main_click, main_point_ids),
+            "ts_plot": (ts_click, ts_point_ids),
+            "scatter_plot": (scatter_click, scatter_point_ids),
+        }
+        if trigger in clicks:
+            click, point_ids = clicks[trigger]
+            if not click or not click.get("points"):
+                raise dash.exceptions.PreventUpdate
+            point_id = get_point_id_from_event_point(click["points"][0], point_ids)
+            if point_id is None:
+                raise dash.exceptions.PreventUpdate
+            return int(point_id)
+        if current_id is None or not csv_file:
+            raise dash.exceptions.PreventUpdate
+        df = _scatter_frame(dataset, csv_file, sub_sample, sampling_mode, cruise_track_selection)
+        if df.empty:
+            raise dash.exceptions.PreventUpdate
+        if "times" in df.columns:
+            df = df.sort_values("times", kind="stable")
+        ordered = df["point_id"].to_numpy()
+        matches = np.nonzero(ordered == current_id)[0]
+        if len(matches):
+            position = matches[0] + (1 if trigger == "detail-next" else -1)
+        else:
+            # Current point was filtered out: continue from the nearest ID.
+            ordered = np.sort(ordered)
+            position = int(np.searchsorted(ordered, current_id))
+            position -= 1 if trigger == "detail-prev" else 0
+        if position < 0 or position >= len(ordered):
+            raise dash.exceptions.PreventUpdate
+        return int(ordered[position])
+
+    # Ring the Details point on the transect, T-S and scatter plots,
+    # browser-side (assets/details.js).
+    app.clientside_callback(
+        ClientsideFunction(namespace="details", function_name="markPoint"),
+        Output('detail_marker_sink', 'data'),
+        Input('detail_point_id', 'data'),
+        Input('detail_marker', 'value'),
+        Input('detail_marker_color', 'value'),
+    )
+
+    @app.callback(
+        Output('click-output', 'children'),
+        Input('detail_point_id', 'data'),
         State('dataset_selector', 'value'),
         State('csv_selector', 'value'),
         State('sub_sample', 'value'),
         State('sampling_mode', 'value'),
     )
-    def display_click_data(clickData, main_point_ids, dataset, csv_file, sub_sample, sampling_mode):
+    def display_click_data(point_id, dataset, csv_file, sub_sample, sampling_mode):
         """
-        Display detailed information for a clicked point in the main scatter plot.
+        Display detailed information for the current Details point.
         Fetches the full row server-side using point_id.
         """
-        if not clickData or not clickData.get("points"):
+        if point_id is None:
             return "Click on a point to see full details."
         try:
-            clicked_point = clickData["points"][0]
-            point_id = get_point_id_from_event_point(clicked_point, main_point_ids)
-
-            if point_id is None:
-                return "Click on a data point to see full details."
-
             df = data.load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
             row = get_row_by_point_id(df, point_id)
 
@@ -1973,11 +2532,12 @@ def register_callbacks(app: dash.Dash) -> None:
                                 "borderRadius": "6px",
                                 "border": "1px solid #ccc",
                                 "marginBottom": "12px",
-                                "backgroundColor": "#f5f5f5",
+                                "backgroundColor": "#fff",
                             },
                         ),
                     ],
                     key=f"image-block-{point_id}-{key_suffix}",
+                    className="frame-block",
                 )
 
             return html.Div(

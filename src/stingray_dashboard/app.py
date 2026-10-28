@@ -63,6 +63,8 @@ def create_app(
         __name__,
         assets_folder=str(resolve_assets_dir()),
         assets_url_path="/assets",
+        # gzip responses (Plotly/Dash JS bundles, figure JSON) via flask-compress.
+        compress=True,
     )
 
     dash_app.layout = make_layout()
