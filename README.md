@@ -1,7 +1,21 @@
 # Stingray Dashboard
 
-Stingray Dashboard is a read-only Dash application for exploring dashboard-ready
-Stingray CSV products.
+Stingray Dashboard is an interactive web dashboard for exploring high-resolution
+observations from mobile ocean observing platforms, such as towed sleds,
+autonomous underwater vehicles, gliders, and profiling vehicles. Data from a
+moving platform form a continuous record along its trajectory, and the
+dashboard keeps that context: a vehicle-track timeline, along-track sections,
+temperature-salinity diagrams, vertical profiles, and scatter plots are linked
+by selection, and each point shows its sensor values and the camera frame
+recorded there. Physical, chemical, optical, and image-derived variables can
+then be examined together, during a deployment for quality control or after the
+cruise for analysis, and plots can be exported as publication-ready figures.
+
+It was developed for the Stingray towed sled used by the Northeast U.S. Shelf
+Long-Term Ecological Research (NES-LTER) program and is platform-agnostic: any
+platform whose data are a time-indexed CSV with position and depth can be
+explored, including long-range AUV records. The dashboard is read-only and
+never modifies the data.
 
 ## Data layout
 

@@ -3,57 +3,127 @@
 This page describes how to use the dashboard once it is running. For install,
 data layout, and deployment, see the [README](../README.md).
 
+## Layout
+
+- **Top bar:** dataset and file selection, CSV download, global options, and the
+  reset button.
+- **Plots (left):** track, transect, T-S, profile, and scatter. Each has its own
+  toolbar with the main choices, an **⬇ Export** button, and a **⚙ More** menu
+  for ranges, colormaps, labels, and sizes.
+- **Details (right):** the values and camera frames of one point. Drag the
+  divider to resize it; double-click the divider to reset the width.
+
 ## Choosing data
 
-Pick a dataset folder, then a CSV file, in the global options. **Refresh**
-reloads the file list. **More** holds subsampling or averaging, opacity, marker
-size, font size, and the point marker. Subsampling and averaging apply to every
-plot.
+Pick a dataset folder, then a data file. The lists rescan the data folder every
+30 minutes, so new files appear without a reload. The **⟳** button rescans
+immediately, clears the cached data, and resets every plot (zoom and
+selections).
+
+**Download CSV** asks for a name, email, and institution before it sends the
+file. Operators can turn downloads off with
+`STINGRAY_DASHBOARD_DOWNLOADS_ENABLED=false`, which disables the button.
+
+### Global options
+
+The **⚙ More** menu next to Download CSV applies to every plot:
+
+| Option | Meaning |
+| --- | --- |
+| Sampling mode | **Subsample** keeps every Nth point. **Average bins** averages N points per bin. |
+| Bin size (N points) | N for either mode. Empty chooses automatically. |
+| Max time gap (s) | In average mode, a bin does not run across a gap longer than this, so averages do not bridge separate deployments or casts. |
+| Opacity | How visible unselected points are while a selection is active. |
+| Size | Marker size. |
+| Font | Font size of all plots. Plot text and margins scale with it. |
+| Point marker, Marker color | Ring around the Details point on the transect, T-S, scatter, and profile plots. |
 
 ## Plots
 
-Each plot has a title row with its main variables, a **⬇ Export** button, and a
-**⚙ More** menu for ranges, colormaps, labels, and sizes.
-
 | Plot | What it shows |
 | --- | --- |
-| Track | Cruise track on a map or on longitude and latitude axes. Selecting points here filters every other plot. |
-| Transect | Depth against the chosen variable, colored by a third variable. |
+| Track | Time, latitude, longitude, or depth against another of them (default time against latitude). Selecting points here filters every other plot. |
+| Transect | Depth against latitude, longitude, or time, colored by a variable. Bathymetry and station overlays can be switched on or off. |
 | T-S | Temperature against salinity, colored by a variable. |
-| Profile | Vertical profiles of the casts in the current selection. |
-| Scatter | Any two numeric variables, with an optional linear, 2nd- or 3rd-order fit. |
+| Profile | Vertical profiles of one variable for the casts in the current selection. |
+| Scatter | Any two numeric variables, optionally colored by a third, with an optional fit. |
 
-### Sizes and labels
+Variable lists show numeric columns only. Latitude, longitude, and depth can
+also be used as scatter axes and as color variables where they make sense.
 
-- **Plot W × H (px)** sets the size of the plot including its axis text. A
-  color bar or legend is added outside that size, so changing the color bar
-  position does not change the plot.
-- **X, Y, and Color label** fields replace the automatic axis and color bar
-  titles. Leave them empty to use the automatic label.
-- **Color bar position** is bottom or right on the colored plots.
-- **Color min and max** fix the color range. Leave them empty for an automatic
-  range.
-- Latitude and longitude limits accept negative values for south and west, for
-  example `-10` for 10°S or 10°W.
+### Per-plot options (⚙ More)
 
-### Linked selection
+- **Colormap:** the Plotly sequential and qualitative maps, plus the cmocean
+  maps (named `cmo.<name>`) on the colored plots.
+- **Ranges:** depth, latitude, and longitude limits on the transect, X and Y
+  limits on the scatter plot, and a color range on every colored plot. Leave
+  a box empty for the automatic range. Either order is accepted. Latitude and
+  longitude accept negative values for south and west, for example `-10` for
+  10°S or 10°W.
+- **Color bar:** bottom or right of the plot.
+- **X, Y, and Color label:** replace the automatic titles. Empty keeps the
+  default. `<sub>` and `<sup>` work, for example `µg l<sup>-1</sup>`.
+- **Plot W × H (px):** the size of the plot including its axis text. A color bar
+  or legend is added outside that size, so moving the color bar does not change
+  the plot.
 
-A box or lasso on the transect, T-S, or scatter plot highlights the same points
-on the others. The latest selection wins. The track plot filters all plots. The
-profile plot shows the casts of the selection, and its legend can be switched
-off, for example before exporting.
+### Scatter fit
 
-### Details
+Choose **Linear**, **2nd order**, or **3rd order** in the scatter toolbar. The
+fit curve and a summary panel with the equation, R², RMSE, and n appear.
+**On selected** fits only the points currently selected in any linked plot;
+otherwise the fit uses all points. The fit line color is under More.
 
-Click a point to see its values and camera frames when `media` and `frame`
-columns exist. Prev and Next step through points in time. The point is ringed on
-the linked plots and its cast is drawn bold on the profile plot. Drag the
-divider to resize the panel.
+## Selecting points
 
-### Sharing a view
+A box or lasso on the **transect, T-S, or scatter** plot is mirrored onto the
+other two: the same observations are highlighted everywhere and the rest fade
+(see Opacity). The latest selection wins, and the box you drew on a previous
+plot is removed. Double-click an empty area to clear the selection.
 
-The URL stores the dashboard settings, so a copied link or the browser's Back
-button reproduces a view.
+A selection also drives:
+
+- the **profile** plot, which shows the casts of the selected points;
+- the **scatter fit**, when **On selected** is ticked.
+
+A box or lasso on the **track** plot works differently: it filters the data for
+every plot, as if the other points did not exist. Clearing it restores all
+observations. Changing dataset, file, or bin size also restores all
+observations.
+
+## Profile
+
+When the data have a `cast` column, each selected cast is drawn as its own
+profile. On towed and AUV tracks these are the vertical segments (pseudo-casts)
+identified along the trajectory, so each one is a slanted profile rather than a
+fixed station. A selection on the other plots expands to whole casts. Without a
+`cast` column the plot shows a median profile with a percentile envelope.
+Colors always come from a qualitative palette. Casts are labeled with their
+number and position (`Cast · 43.80N 70.10W`); the legend can be switched off in
+More, for example before exporting.
+
+## Details
+
+Click a point on the transect, T-S, or scatter plot. Details shows:
+
+- the camera frame or frames, when `media` and `frame` columns exist, with a
+  link to open each frame (`media_<stream>` and `frame_<stream>` columns give
+  extra camera streams). A frame that cannot load shows a short note;
+- time, latitude, longitude, and depth;
+- cruise and cast, when those columns exist;
+- every sensor variable with its unit.
+
+**◀ Prev** and **Next ▶** step to the previous or next point in time. They move
+through the points the plots currently show, after sampling and any track
+filter. A ring marks the point on the transect, T-S, and scatter plots, and on
+the profile plot its cast is drawn bold, a dot marking its depth, while the
+other selected casts fade. A click never changes your box or lasso selection.
+
+## Sharing a view
+
+The URL stores the dashboard settings: dataset, file, variables, ranges,
+colormaps, sizes, and labels. A copied link or the browser's Back button brings
+back the same view.
 
 ## Exporting figures
 
@@ -71,8 +141,8 @@ bar all scale together.
 **Download settings** saves a text file recording the dataset, file, plot
 settings, and export options, so a figure can be reproduced.
 
-Large plots with very many points keep their markers as raster (WebGL) in the
-export. A larger bin size, or averaging, gives sharp vector markers.
+Plots with very many points keep their markers as raster (WebGL) in the export.
+A larger bin size, or averaging, gives sharp vector markers.
 
 ### Several panels
 
