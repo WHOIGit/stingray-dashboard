@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
-from dash import dcc, html
+from dash import dcc, get_relative_path, html
 
 from . import data
 from .config import (
@@ -16,6 +16,10 @@ from .config import (
     choose_default_dataset,
     find_alias,
 )
+
+
+REPOSITORY_URL = 'https://github.com/WHOIGit/stingray-dashboard'
+CITATION_URL = 'https://doi.org/10.5281/zenodo.15025961'
 
 
 def _read_project_version() -> str:
@@ -65,10 +69,12 @@ def _select_field(label: str, control) -> html.Div:
     return html.Div([html.Label(label), control], className='control-field')
 
 
-def _range_field(label, min_id, max_id, min_value=None, max_value=None) -> html.Div:
-    """Min/max pair sharing one row."""
+def _range_field(label, min_id, max_id, min_value=None, max_value=None,
+                 hint=None) -> html.Div:
+    """Min/max pair sharing one row, with an optional one-line hint."""
     return html.Div([
         html.Label(f'{label} range:'),
+        *([html.Div(hint, className='control-hint')] if hint else []),
         html.Div([
             dcc.Input(id=min_id, type='number', value=min_value, placeholder='min', debounce=True),
             html.Span('–', className='range-sep'),
@@ -77,15 +83,26 @@ def _range_field(label, min_id, max_id, min_value=None, max_value=None) -> html.
     ], className='control-field')
 
 
-def _size_fields(width_id, width, height_id, height) -> html.Div:
+def _text_field(label, input_id) -> html.Div:
+    """Text box for overriding an axis or colorbar label (blank = default)."""
     return html.Div([
-        html.Label('Size W × H (px):'),
+        html.Label(label),
+        dcc.Input(id=input_id, type='text', placeholder='default', debounce=True),
+    ], className='control-field',
+        title='Blank keeps the default label. <sub> and <sup> work, e.g. µg l<sup>-1</sup>')
+
+
+def _size_fields(width_id, width, height_id, height) -> html.Div:
+    """Plot size, axis text included. A color bar or legend is added outside it."""
+    return html.Div([
+        html.Label('Plot W × H (px):'),
         html.Div([
             dcc.Input(id=width_id, type='number', value=width, debounce=True),
             html.Span('×', className='range-sep'),
             dcc.Input(id=height_id, type='number', value=height, debounce=True),
         ], className='range-inputs'),
-    ], className='control-field')
+    ], className='control-field',
+        title='Size of the plot with its axis text; a color bar or legend is added outside it')
 
 
 def _plot_card(title, primary, more, graph_id, container_id, card_class='',
@@ -95,16 +112,19 @@ def _plot_card(title, primary, more, graph_id, container_id, card_class='',
     ``aside`` is an optional panel shown beside the plot.
     """
     plot = html.Div([
-        dcc.Graph(
-            id=graph_id,
-            responsive=True,
-            style={"width": "100%", "height": "100%"}
-        )
+        # The figure carries its own size (see plot_utils.frame_layout).
+        dcc.Graph(id=graph_id, responsive=False)
     ], id=container_id, className='plot-area')
     return html.Div([
         html.Div([
             html.Span(title, className='section-label'),
             *primary,
+            html.Button(
+                '⬇ Export',
+                id=f'export-open-{graph_id}',
+                className='export-open-button',
+                title='Export this plot as a figure (PNG, SVG, TIFF) at a width in inches and a dpi',
+            ),
             html.Details([
                 html.Summary('⚙ More', title='More plot options'),
                 html.Div(more, className='more-panel'),
@@ -163,7 +183,12 @@ def make_layout() -> html.Div:
         name for name in px.colors.qualitative.__dict__
         if not name.startswith("_") and isinstance(getattr(px.colors.qualitative, name), list)
     ]
-    colormaps = sequential_maps + qualitative_maps
+    cmocean = getattr(px.colors, "cmocean", None)
+    cmocean_maps = [
+        f"cmo.{name}" for name in vars(cmocean)
+        if not name.startswith("_") and isinstance(getattr(cmocean, name), list)
+    ] if cmocean is not None else []
+    colormaps = sequential_maps + cmocean_maps + qualitative_maps
 
     return html.Div([
         # --- URL Sync ---
@@ -187,7 +212,8 @@ def make_layout() -> html.Div:
         ], className='header-top flex-row'),
         # ===== SUB HEADER =====
         html.Div([
-            html.Span('STINGRAY DASHBOARD', className='header-title'),
+            html.A('STINGRAY DASHBOARD', href=get_relative_path('/'),
+                   className='header-title', title='Back to the main page'),
             html.A(
                 html.Img(src='/assets/NES-LTER-horizontal.png',
                         # Same width as the LTER logo; cover-crops the image's
@@ -202,7 +228,7 @@ def make_layout() -> html.Div:
             html.Div([
                 html.Div([
                 html.Div([
-                    html.Span('GLOBAL OPTIONS', className='section-label'),
+                    html.Span('DATA', className='section-label'),
                     html.Div([
                         html.Label('Dataset:'),
                         dcc.Dropdown(
@@ -221,7 +247,6 @@ def make_layout() -> html.Div:
                             clearable=False
                         ),
                     ], className='control-field'),
-                    html.Button('⟳', id='refresh-button', title='Refresh dataset and file lists'),
                     html.Button(
                         'Download CSV',
                         id='download-button',
@@ -290,6 +315,11 @@ def make_layout() -> html.Div:
                             ], className='control-field'),
                         ], className='more-panel more-grid'),
                     ], className='more-menu global-more'),
+                    html.Button(
+                        '⟳',
+                        id='refresh-button',
+                        title='Refresh file lists and reset all plots (zoom and selections)',
+                    ),
                     dcc.Download(id='download_dataframe_csv'),
                 ], className='global-fields'),
             ], className='panel global-panel options-panel'),
@@ -323,11 +353,146 @@ def make_layout() -> html.Div:
                 ], className='download-modal-actions'),
             ], className='download-modal'),
         ], id='download-modal-backdrop', className='download-modal-backdrop hidden'),
+        # ===== FIGURE EXPORT =====
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.Div('Export figure', id='export-title', className='download-modal-title'),
+                    html.Button('×', id='export-close-x', className='modal-close-button'),
+                ], className='download-modal-header'),
+                html.Div([
+                    html.Label('Format:'),
+                    dcc.Dropdown(
+                        id='export-format',
+                        options=[
+                            {'label': 'PNG', 'value': 'png'},
+                            {'label': 'SVG', 'value': 'svg'},
+                            {'label': 'TIFF', 'value': 'tiff'},
+                        ],
+                        value='png',
+                        clearable=False,
+                    ),
+                ], className='control-field'),
+                html.Div([
+                    html.Label('Width (in):'),
+                    dcc.Input(id='export-width', type='number', value=11, min=0.5, step='any'),
+                ], className='control-field',
+                    title='Total figure width. Height, text and markers scale with it, as on screen'),
+                html.Div([
+                    html.Label('Resolution (dpi):'),
+                    dcc.Input(id='export-dpi', type='number', value=300, min=72, max=1200, step=1),
+                ], className='control-field', title='PNG and TIFF; SVG is vector'),
+                html.Div([
+                    html.Label('Background:'),
+                    dcc.Dropdown(
+                        id='export-background',
+                        options=[
+                            {'label': 'White', 'value': 'white'},
+                            {'label': 'Transparent', 'value': 'transparent'},
+                        ],
+                        value='white',
+                        clearable=False,
+                    ),
+                ], className='control-field'),
+                html.Div([
+                    html.Div(id='export-panel-rows'),
+                    html.Button('+ Add panel', id='export-panel-add', n_clicks=0,
+                                className='modal-secondary-button export-panel-add'),
+                    html.Div(
+                        'Each row is a panel with its own choices; everything else follows the '
+                        'plot as shown, and each panel has its own color bar.',
+                        className='control-hint',
+                    ),
+                    html.Div(
+                        dcc.Checklist(
+                            id='export-multi',
+                            options=[{'label': 'Combine panels into one figure', 'value': 'on'}],
+                            value=[],
+                            className='export-switch',
+                        ),
+                        title='Off: each panel is saved as its own file',
+                    ),
+                    html.Div([
+                        html.Div([
+                            html.Label('Rows × columns:'),
+                            html.Div([
+                                dcc.Input(id='export-rows', type='number', min=1, step=1, placeholder='auto'),
+                                html.Span('×', className='range-sep'),
+                                dcc.Input(id='export-cols', type='number', min=1, step=1, placeholder='auto'),
+                            ], className='range-inputs'),
+                        ], className='control-field'),
+                        html.Div([
+                            html.Label('Fit to page:'),
+                            dcc.Dropdown(
+                                id='export-fit',
+                                options=[
+                                    {'label': 'None (use Width)', 'value': 'none'},
+                                    {'label': 'Letter portrait', 'value': '8.5x11'},
+                                    {'label': 'Letter landscape', 'value': '11x8.5'},
+                                    {'label': 'Legal portrait', 'value': '8.5x14'},
+                                    {'label': 'Tabloid portrait', 'value': '11x17'},
+                                    {'label': 'A5 portrait', 'value': '5.83x8.27'},
+                                    {'label': 'A4 portrait', 'value': '8.27x11.69'},
+                                    {'label': 'A4 landscape', 'value': '11.69x8.27'},
+                                    {'label': 'A3 portrait', 'value': '11.69x16.54'},
+                                ],
+                                value='none',
+                                clearable=False,
+                            ),
+                        ], className='control-field',
+                            title='Pick a page size, or type your own below. The file is the whole '
+                                  'page with the grid scaled to fit inside the margin; Width is then ignored'),
+                        html.Div([
+                            html.Label('Page W × H (in):'),
+                            html.Div([
+                                dcc.Input(id='export-page-w', type='number', min=1, step='any', placeholder='none'),
+                                html.Span('×', className='range-sep'),
+                                dcc.Input(id='export-page-h', type='number', min=1, step='any', placeholder='none'),
+                            ], className='range-inputs'),
+                        ], className='control-field'),
+                        html.Div([
+                            html.Label('Margin (in):'),
+                            dcc.Input(id='export-margin', type='number', value=0.5, min=0, step=0.05),
+                        ], className='control-field'),
+                        html.Div([
+                            html.Label('Panel letters:'),
+                            dcc.Dropdown(
+                                id='export-letters',
+                                options=[
+                                    {'label': 'None', 'value': 'none'},
+                                    {'label': '(a), (b), …', 'value': 'lower'},
+                                    {'label': '(A), (B), …', 'value': 'upper'},
+                                ],
+                                value='upper',
+                                clearable=False,
+                            ),
+                        ], className='control-field'),
+                    ], id='export-combined-block'),
+                ], id='export-multi-block', style={'display': 'none'}),
+                html.Div(
+                    'A scaled copy of the plot as shown: height, text and markers follow the width.',
+                    className='control-hint',
+                ),
+                html.Div(id='export-status', className='export-status'),
+                html.Div([
+                    html.Button('Download settings', id='export-settings-button',
+                                className='modal-secondary-button',
+                                title='A text file recording how this figure was made'),
+                    html.Button('Download figure', id='export-download-button'),
+                ], className='download-modal-actions'),
+                dcc.Store(id='export_target'),
+                dcc.Store(id='export_sink'),
+                dcc.Store(id='export_sink_multi'),
+                dcc.Store(id='export_panels'),
+                dcc.Store(id='export_rows', data=[]),
+                dcc.Download(id='export_settings_download'),
+            ], className='download-modal'),
+        ], id='export-modal-backdrop', className='download-modal-backdrop hidden'),
         # ===== MAIN BODY =====
         html.Div([
             html.Div([
                 _plot_card(
-                    'CRUISE TRACK',
+                    'TRACK',
                     primary=[
                         _inline_field('X-axis:', dcc.Dropdown(
                             id='cruise_track_xaxis',
@@ -341,14 +506,16 @@ def make_layout() -> html.Div:
                         )),
                     ],
                     more=[
-                        _size_fields('track_width', 900, 'track_height', 320),
+                        _text_field('X label:', 'track_xlabel'),
+                        _text_field('Y label:', 'track_ylabel'),
+                        _size_fields('track_width', 900, 'track_height', 300),
                     ],
                     graph_id='cruise_track',
                     container_id='track_container',
                     card_class='plot-card-wide',
                 ),
                 _plot_card(
-                    'TRANSECT PLOT',
+                    'TRANSECT',
                     primary=[
                         _inline_field('X-axis:', dcc.Dropdown(
                             id='x_axis_variable',
@@ -388,18 +555,31 @@ def make_layout() -> html.Div:
                             options=[{'label': cmap, 'value': cmap} for cmap in colormaps],
                             value='Jet'
                         )),
-                        _range_field('Depth', 'z_min', 'z_max'),
-                        _range_field('Latitude', 'lat_min', 'lat_max'),
-                        _range_field('Longitude', 'lon_min', 'lon_max'),
+                        _range_field('Depth', 'z_min', 'z_max',
+                                     hint='Blank = full range; either order'),
+                        _range_field('Latitude', 'lat_min', 'lat_max',
+                                     hint='-10 = 10°S, 10 = 10°N'),
+                        _range_field('Longitude', 'lon_min', 'lon_max',
+                                     hint='-10 = 10°W, 10 = 10°E'),
                         _range_field('Color', 'v_min', 'v_max'),
-                        _size_fields('main_width', 900, 'main_height', 620),
+                        _select_field('Color bar:', dcc.Dropdown(
+                            id='main_colorbar_pos',
+                            options=[{'label': 'Bottom', 'value': 'bottom'},
+                                     {'label': 'Right', 'value': 'right'}],
+                            value='bottom',
+                            clearable=False,
+                        )),
+                        _text_field('X label:', 'main_xlabel'),
+                        _text_field('Y label:', 'main_ylabel'),
+                        _text_field('Color label:', 'main_clabel'),
+                        _size_fields('main_width', 900, 'main_height', 400),
                     ],
                     graph_id='main_plot',
                     container_id='main_container',
                     card_class='plot-card-wide',
                 ),
                 _plot_card(
-                    'T-S PLOT',
+                    'T-S',
                     primary=[
                         _inline_field('Color:', dcc.Dropdown(
                             id='ts_color_variable',
@@ -415,13 +595,23 @@ def make_layout() -> html.Div:
                             value='Viridis'
                         )),
                         _range_field('Color', 'ts_v_min', 'ts_v_max'),
-                        _size_fields('ts_width', 500, 'ts_height', 620),
+                        _select_field('Color bar:', dcc.Dropdown(
+                            id='ts_colorbar_pos',
+                            options=[{'label': 'Bottom', 'value': 'bottom'},
+                                     {'label': 'Right', 'value': 'right'}],
+                            value='bottom',
+                            clearable=False,
+                        )),
+                        _text_field('X label:', 'ts_xlabel'),
+                        _text_field('Y label:', 'ts_ylabel'),
+                        _text_field('Color label:', 'ts_clabel'),
+                        _size_fields('ts_width', 400, 'ts_height', 400),
                     ],
                     graph_id='ts_plot',
                     container_id='ts_container',
                 ),
                 _plot_card(
-                    'PROFILE PLOT',
+                    'PROFILE',
                     primary=[
                         _inline_field('Variable:', dcc.Dropdown(
                             id='profile_variable',
@@ -436,13 +626,24 @@ def make_layout() -> html.Div:
                             options=[{'label': cmap, 'value': cmap} for cmap in qualitative_maps],
                             value='Plotly'
                         )),
-                        _size_fields('profile_width', 500, 'profile_height', 620),
+                        html.Div([
+                            html.Label('Legend:'),
+                            dcc.Checklist(
+                                id='profile_legend',
+                                options=[{'label': 'Show', 'value': 'True'}],
+                                value=['True'],
+                                className='toolbar-check',
+                            ),
+                        ], className='control-field', title='Untick to hide the cast legend, e.g. before exporting the image'),
+                        _text_field('X label:', 'profile_xlabel'),
+                        _text_field('Y label:', 'profile_ylabel'),
+                        _size_fields('profile_width', 300, 'profile_height', 450),
                     ],
                     graph_id='profile_plot',
                     container_id='profile_container',
                 ),
                 _plot_card(
-                    'SCATTER PLOT',
+                    'SCATTER',
                     primary=[
                         _inline_field('X:', dcc.Dropdown(
                             id='scatter_x',
@@ -503,9 +704,21 @@ def make_layout() -> html.Div:
                             clearable=False,
                         )),
                         _range_field('Color', 'scatter_v_min', 'scatter_v_max'),
-                        _range_field('X', 'scatter_x_min', 'scatter_x_max'),
-                        _range_field('Y', 'scatter_y_min', 'scatter_y_max'),
-                        _size_fields('scatter_width', 640, 'scatter_height', 520),
+                        _select_field('Color bar:', dcc.Dropdown(
+                            id='scatter_colorbar_pos',
+                            options=[{'label': 'Bottom', 'value': 'bottom'},
+                                     {'label': 'Right', 'value': 'right'}],
+                            value='bottom',
+                            clearable=False,
+                        )),
+                        _range_field('X', 'scatter_x_min', 'scatter_x_max',
+                                     hint='Blank = automatic; either order'),
+                        _range_field('Y', 'scatter_y_min', 'scatter_y_max',
+                                     hint='Blank = automatic; either order'),
+                        _text_field('X label:', 'scatter_xlabel'),
+                        _text_field('Y label:', 'scatter_ylabel'),
+                        _text_field('Color label:', 'scatter_clabel'),
+                        _size_fields('scatter_width', 400, 'scatter_height', 400),
                     ],
                     graph_id='scatter_plot',
                     container_id='scatter_container',
@@ -537,6 +750,7 @@ def make_layout() -> html.Div:
                 ], className='details-header'),
                 dcc.Store(id='detail_point_id'),
                 dcc.Store(id='detail_marker_sink'),
+                dcc.Store(id='reset_view_sink'),
                 html.Div(id='click-output', className='card', style={
                     'font-size': '13px',
                     'line-height': '1.4em'
@@ -546,15 +760,23 @@ def make_layout() -> html.Div:
         ], className='dashboard-main'),
         # ===== FOOTER =====
         html.Div([
-            html.Span(
-                'Developed by Sosik Lab @ WHOI | '
-                'Credits: Anh Pham, Sidney Batchelder, Joe Futrelle, Heidi Sosik',
-                className='footer-credit',
-            ),
-            html.Span(
-                f'Version {DASHBOARD_VERSION} | October 2026',
-                className='footer-version',
-            )
+            html.Span([
+                f'Stingray Dashboard v{DASHBOARD_VERSION} · Developed by ',
+                html.Span(
+                    'Sosik Lab @ WHOI',
+                    className='footer-contributors',
+                    title=(
+                        'Developers: Anh H. Pham, E. Taylor Crockford, Heidi M. Sosik'
+                        '\n'
+                        'Contributors: Sidney Batchelder, Joe Futrelle'
+                    ),
+                ),
+            ], className='footer-credit'),
+            html.Span([
+                html.A('Source', href=REPOSITORY_URL, target='_blank', rel='noopener'),
+                html.A('Cite', href=CITATION_URL, target='_blank', rel='noopener',
+                       title='Zenodo record: cite or export (BibTeX, RIS for EndNote/Zotero)'),
+            ], className='footer-links'),
         ], className='footer')
     ], className='dashboard-shell')
 

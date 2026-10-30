@@ -13,7 +13,9 @@ meta_vars = [
     "media", "frame", "media_1", "frame_1",
 ]
 
-MEDIA_VAR_RE = re.compile(r"^(?:media|frame)(?:_[1-9][0-9]*)?$")
+# media/frame (first camera) or media_<stream>/frame_<stream>; a stream is a
+# camera name or an older number.
+MEDIA_VAR_RE = re.compile(r"^(?:media|frame)(?:_.+)?$")
 
 
 def is_meta_var(name: str) -> bool:
@@ -43,6 +45,9 @@ def choose_default_dataset(datasets):
 # ============================================
 # Units
 # ============================================
+# Keep the units below identical to stingraytools' units.yaml (src/stingray/
+# config/defaults/units.yaml), which sets the unit of each merged sensor
+# column. "ind m⁻³" is dashboard-only: abundance columns are named by class.
 unit_patterns = {
     "°C": ["temperature","temp","t090","t190","t2","tv","_t"],
     "S m⁻¹": ["conductivity","cond","c0","c1","mS/cm"],
@@ -69,7 +74,9 @@ unit_patterns = {
 # Instrument exports keep their own column names (e.g. SeaBird t090c, sal00).
 # Columns are not renamed or copied; code that needs a quantity looks it up
 # here. Order matters: the first name present in a file wins, so primary
-# sensors come before secondary ones.
+# sensors come before secondary ones. The first name of each entry is the
+# output column name stingraytools writes (its columns.yaml); the rest are
+# other instruments' names for the same quantity.
 SENSOR_ALIASES = {
     "temperature": ["temperature", "t090c", "t090", "t190c", "t190"],
     "salinity": ["salinity", "sal00", "sal11"],
@@ -77,6 +84,29 @@ SENSOR_ALIASES = {
     "pressure": ["pressure", "prdm", "prd", "press"],
     "backscattering": ["backscattering", "bb", "bbp"],
 }
+
+
+# Variables listed first in every plot dropdown, in this order. Each is matched
+# by quantity (see SENSOR_ALIASES) or by name prefix (oxygen -> oxygen_*).
+VARIABLE_PRIORITY = [
+    "chlorophyll", "backscattering", "par", "oxygen", "nitrate",
+    "temperature", "salinity", "density",
+]
+# Technical columns listed last.
+VARIABLE_LAST = {"cast", "deployment", "altitude", "pitch", "roll", "heading"}
+VARIABLE_LAST_PREFIXES = ("velocity_",)
+
+
+def variable_rank(name: str) -> tuple[int, int]:
+    """Sort key for dropdown order: priority variables, the rest, technical."""
+    lname = name.lower()
+    for index, quantity in enumerate(VARIABLE_PRIORITY):
+        if lname in SENSOR_ALIASES.get(quantity, [quantity]) or lname == quantity \
+                or lname.startswith(quantity + "_"):
+            return (0, index)
+    if lname in VARIABLE_LAST or lname.startswith(VARIABLE_LAST_PREFIXES):
+        return (2, 0)
+    return (1, 0)
 
 
 def find_alias(columns, quantity):
@@ -156,15 +186,15 @@ URL_SYNCED_PARAMS = [
     {"key": "maxgap", "id": "max_gap_seconds", "default": DEFAULT_MAX_TIME_GAP_SEC, "type": "int"},
     # layout
     {"key": "trackw", "id": "track_width", "default": 900, "type": "int"},
-    {"key": "trackh", "id": "track_height", "default": 320, "type": "int"},
+    {"key": "trackh", "id": "track_height", "default": 300, "type": "int"},
     {"key": "mainw", "id": "main_width", "default": 900, "type": "int"},
-    {"key": "mainh", "id": "main_height", "default": 620, "type": "int"},
-    {"key": "tsw", "id": "ts_width", "default": 500, "type": "int"},
-    {"key": "tsh", "id": "ts_height", "default": 620, "type": "int"},
-    {"key": "profilew", "id": "profile_width", "default": 500, "type": "int"},
-    {"key": "profileh", "id": "profile_height", "default": 620, "type": "int"},
-    {"key": "scatterw", "id": "scatter_width", "default": 640, "type": "int"},
-    {"key": "scatterh", "id": "scatter_height", "default": 520, "type": "int"},
+    {"key": "mainh", "id": "main_height", "default": 400, "type": "int"},
+    {"key": "tsw", "id": "ts_width", "default": 400, "type": "int"},
+    {"key": "tsh", "id": "ts_height", "default": 400, "type": "int"},
+    {"key": "profilew", "id": "profile_width", "default": 300, "type": "int"},
+    {"key": "profileh", "id": "profile_height", "default": 450, "type": "int"},
+    {"key": "scatterw", "id": "scatter_width", "default": 400, "type": "int"},
+    {"key": "scatterh", "id": "scatter_height", "default": 400, "type": "int"},
     # global text
     {"key": "fontsize", "id": "plot_font_size", "default": 14, "type": "int"},
 ]

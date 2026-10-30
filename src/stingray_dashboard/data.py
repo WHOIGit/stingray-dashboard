@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import DEFAULT_MAX_TIME_GAP_SEC, find_alias, is_meta_var
+from .config import DEFAULT_MAX_TIME_GAP_SEC, find_alias, is_meta_var, variable_rank
 
 WORK_DIR = Path("dash_data")
 DATA_DIR = WORK_DIR / "data"
@@ -174,14 +174,32 @@ def coerce_numeric_columns(df: pd.DataFrame, threshold: float = NUMERIC_TEXT_THR
     return df
 
 
+def has_valid_times(df: pd.DataFrame) -> bool:
+    """True when the data has a times column with at least one valid time."""
+    return "times" in df.columns and bool(df["times"].notna().any())
+
+
 def plot_variables(df: pd.DataFrame) -> list[str]:
-    """Numeric sensor columns offered in the plot variable lists."""
-    return [
+    """Numeric sensor columns offered in the plot variable lists.
+
+    The variables people look at most come first (see VARIABLE_PRIORITY); the
+    rest keep file order and technical columns (cast, velocities, ...) go last.
+    """
+    columns = [
         col for col in df.columns
         if col != "point_id"
         and "_std" not in col
         and not is_meta_var(col)
         and pd.api.types.is_numeric_dtype(df[col])
+    ]
+    return sorted(columns, key=variable_rank)
+
+
+def coordinate_variables(df: pd.DataFrame) -> list[str]:
+    """Latitude and longitude columns present as numbers, for color lists."""
+    return [
+        col for col in ("latitude", "longitude")
+        if col in df.columns and pd.api.types.is_numeric_dtype(df[col])
     ]
 
 

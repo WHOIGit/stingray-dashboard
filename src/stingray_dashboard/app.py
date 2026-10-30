@@ -8,6 +8,7 @@ import dash
 from .callbacks import register_callbacks
 from .data import init_data_paths, load_auxiliary_data
 from .config import set_default_dataset
+from .export import register_export_routes
 from .layout import make_layout
 
 
@@ -69,6 +70,7 @@ def create_app(
 
     dash_app.layout = make_layout()
     register_callbacks(dash_app)
+    register_export_routes(dash_app)
 
     return dash_app
 

@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
-from dash import ClientsideFunction, Input, Output, Patch, State, ctx, dcc, html, no_update
+from dash import ALL, ClientsideFunction, Input, Output, Patch, State, ctx, dcc, html, no_update
 from flask import has_request_context, request
 
 from . import data
@@ -34,13 +34,24 @@ from .plot_utils import (
     get_visible_range,
     is_discrete_variable,
     resolve_range,
+    variable_label,
+    colorbar_layout,
+    coloraxis_name,
+    apply_frame,
+    frame_layout,
 )
-from .layout import default_scatter_axes
+from .layout import CITATION_URL, DASHBOARD_VERSION, default_scatter_axes
 from .science import density_grid, polynomial_fit
 
 logger = logging.getLogger(__name__)
 # White background for figures that don't set one (e.g. empty-state messages).
-pio.templates.default = "plotly_white"
+# plotly_white without the zero line: Plotly draws a pale line at 0 on every axis,
+# which nobody asked for and which shows up as a band on transparent exports.
+_template = go.layout.Template(pio.templates["plotly_white"])
+_template.layout.xaxis.zeroline = False
+_template.layout.yaxis.zeroline = False
+pio.templates["stingray"] = _template
+pio.templates.default = "stingray"
 EMAIL_RE = re.compile(
     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -481,15 +492,18 @@ def register_callbacks(app: dash.Dash) -> None:
             numeric_vars = data.plot_variables(data.load_data(dataset, csv_file))
             data.SENSOR_VAR_CACHE[csv_path] = numeric_vars
             data.PROFILE_VAR_CACHE[csv_path] = numeric_vars
-        sensor_vars = data.SENSOR_VAR_CACHE[csv_path]
         profile_vars = data.PROFILE_VAR_CACHE[csv_path]
-        options = [{'label': v.capitalize(), 'value': v} for v in sensor_vars]
-        profile_options = [{'label': v.capitalize(), 'value': v} for v in profile_vars]
+        # Latitude and longitude can color the transect and T-S plots too.
+        sensor_vars = data.SENSOR_VAR_CACHE[csv_path] + data.coordinate_variables(
+            data.load_data(dataset, csv_file)
+        )
+        options = [{'label': variable_label(v), 'value': v} for v in sensor_vars]
+        profile_options = [{'label': variable_label(v), 'value': v} for v in profile_vars]
         temp_col = find_alias(sensor_vars, "temperature")
         sal_col = find_alias(sensor_vars, "salinity")
         default_color = temp_col or (sensor_vars[0] if sensor_vars else None)
         ts_candidates = [v for v in sensor_vars if v not in (temp_col, sal_col)]
-        ts_options = [{'label': v.capitalize(), 'value': v} for v in ts_candidates]
+        ts_options = [{'label': variable_label(v), 'value': v} for v in ts_candidates]
         default_ts = find_alias(ts_candidates, "chlorophyll") or (ts_candidates[0] if ts_candidates else None)
         default_profile = find_alias(profile_vars, "temperature") or (profile_vars[0] if profile_vars else None)
         params = parse_qs(urlparse(search or "").query)
@@ -553,7 +567,7 @@ def register_callbacks(app: dash.Dash) -> None:
             c for c in ("depth", "latitude", "longitude")
             if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
         ]
-        options = [{'label': v.capitalize(), 'value': v} for v in numeric_vars]
+        options = [{'label': variable_label(v), 'value': v} for v in numeric_vars]
         default_x, default_y = default_scatter_axes(numeric_vars)
         params = parse_qs(urlparse(search or "").query)
 
@@ -594,43 +608,38 @@ def register_callbacks(app: dash.Dash) -> None:
         """Reset time-series color scale limits."""
         return None, None
 
-    @app.callback(
-        Output("track_container","style"),
-        Output("main_container","style"),
-        Output("ts_container","style"),
-        Output("profile_container","style"),
-        Output("scatter_container","style"),
-        Input("track_width", "value"),
-        Input("track_height", "value"),
-        Input("main_width","value"),
-        Input("main_height","value"),
-        Input("ts_width","value"),
-        Input("ts_height","value"),
-        Input("profile_width","value"),
-        Input("profile_height","value"),
-        Input("scatter_width","value"),
-        Input("scatter_height","value"),
-        prevent_initial_call=True
-    )
-    def apply_manual_layout(trw, trh, mw, mh, tsw, tsh, pw, ph, sw, sh):
-        def style(w, h):
-            out = {}
-            if w is not None:
-                out["width"] = f"{int(w)}px"
-            if h is not None:
-                out["height"] = f"{int(h)}px"
-            return out if out else no_update
-        return (
-            style(trw, trh),
-            style(mw, mh),
-            style(tsw, tsh),
-            style(pw, ph),
-            style(sw, sh)
-        )
-        
     # ============================================================
     # === Cruise Track Plot (Latitude vs. Time or Longitude) ===
     # ============================================================
+    def _track_axes(df, xaxis, yaxis):
+        """Swap a times axis for longitude/latitude when the data has no valid times."""
+        if data.has_valid_times(df):
+            return xaxis, yaxis
+        if xaxis == "times":
+            xaxis = "longitude"
+        if yaxis == "times":
+            yaxis = "latitude" if xaxis != "latitude" else "longitude"
+        return xaxis, yaxis
+
+    # Keep the Track axis dropdowns in step when a file has no usable times.
+    @app.callback(
+        Output("cruise_track_xaxis", "value"),
+        Output("cruise_track_yaxis", "value"),
+        Input("dataset_selector", "value"),
+        Input("csv_selector", "value"),
+        State("cruise_track_xaxis", "value"),
+        State("cruise_track_yaxis", "value"),
+        prevent_initial_call=True,
+    )
+    def update_track_axes(dataset, csv_file, xaxis, yaxis):
+        if not dataset or not csv_file:
+            raise dash.exceptions.PreventUpdate
+        df = data.load_data(dataset, csv_file)
+        new_x, new_y = _track_axes(df, xaxis, yaxis)
+        if (new_x, new_y) == (xaxis, yaxis):
+            raise dash.exceptions.PreventUpdate
+        return new_x, new_y
+
     @app.callback(
         Output("cruise_track", "figure"),
         Input("dataset_selector", "value"),
@@ -640,9 +649,14 @@ def register_callbacks(app: dash.Dash) -> None:
         Input("plot_font_size", "value"),
         Input("sub_sample", "value"),
         Input("sampling_mode", "value"),
+        Input("track_xlabel", "value"),
+        Input("track_ylabel", "value"),
+        Input("track_width", "value"),
+        Input("track_height", "value"),
         prevent_initial_call=True,
     )
-    def draw_cruise_track(dataset, csv_file, xaxis, yaxis, fontsize, sub_sample, sampling_mode):
+    def draw_cruise_track(dataset, csv_file, xaxis, yaxis, fontsize, sub_sample, sampling_mode,
+                          x_text, y_text, plot_w, plot_h):
         trigger = ctx.triggered_id
         if trigger not in (
             "dataset_selector",   
@@ -651,7 +665,11 @@ def register_callbacks(app: dash.Dash) -> None:
             "cruise_track_yaxis",
             "plot_font_size",
             "sub_sample",
-            "sampling_mode"
+            "sampling_mode",
+            "track_xlabel",
+            "track_ylabel",
+            "track_width",
+            "track_height",
         ):
             raise dash.exceptions.PreventUpdate
         if not csv_file:
@@ -665,6 +683,7 @@ def register_callbacks(app: dash.Dash) -> None:
             return fig
         
         df = data.load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
+        xaxis, yaxis = _track_axes(df, xaxis, yaxis)
         fig = go.Figure()
         fig.add_trace(go.Scattergl(
             x=df[xaxis],
@@ -686,13 +705,13 @@ def register_callbacks(app: dash.Dash) -> None:
             uirevision="cruise-track",
             font=dict(size=fontsize if fontsize else 10),
             xaxis=dict(
-                title=xaxis.capitalize(),
+                title=x_text or xaxis.capitalize(),
                 rangeslider=dict(visible=False),
                 showgrid=True, gridcolor="rgba(0,0,0,0.1)",
                 showline=True, linecolor="black", mirror=True
             ),
             yaxis=dict(
-                title=yaxis.capitalize(),
+                title=y_text or yaxis.capitalize(),
                 autorange=True,
                 fixedrange=False,
                 showgrid=True, gridcolor="rgba(0,0,0,0.1)",
@@ -703,7 +722,7 @@ def register_callbacks(app: dash.Dash) -> None:
         )
         if xaxis in ["longitude", "latitude"] and yaxis in ["longitude", "latitude"]:
             fig.update_layout(yaxis=dict(scaleanchor="x", scaleratio=1))
-        return fig
+        return apply_frame(fig, frame_layout(plot_w, plot_h, fontsize or 10))
 
     # ============================================================
     # === Selections & Range Change Tracking ===
@@ -926,6 +945,12 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('bathymetry', 'value'),
             Input('station', 'value'),
             Input('cruise_track_selection_store', 'data'),
+            Input('main_colorbar_pos', 'value'),
+            Input('main_xlabel', 'value'),
+            Input('main_ylabel', 'value'),
+            Input('main_clabel', 'value'),
+            Input('main_width', 'value'),
+            Input('main_height', 'value'),
             Input('main_plot', 'relayoutData'),
         ],
         State('main_plot_selected_data', 'data'),
@@ -935,11 +960,13 @@ def register_callbacks(app: dash.Dash) -> None:
         x_axis, y_axis, color_var, color_map, size,
         vmin, vmax, zmin, zmax, latmin, latmax, lonmin, lonmax,
         hidden_opacity, fontsize, bathymetry, station,
-        cruise_track_selection, relayoutData, selection
+        cruise_track_selection, colorbar_pos, x_text, y_text, c_text,
+        plot_w, plot_h, relayoutData, selection
     ):
         # ------------------------------------------------------------------
         # 1. Ignore irrelevant relayout events
         # ------------------------------------------------------------------
+        axis_id = coloraxis_name(colorbar_pos)
         trigger = ctx.triggered_id
         if trigger == "main_plot" and relayoutData:
             valid_relayout = any(
@@ -1027,11 +1054,11 @@ def register_callbacks(app: dash.Dash) -> None:
             # A Patch bypasses plotly.py's validation, so send the [[pos, color]]
             # pairs Plotly.js expects rather than a bare list of colors.
             steps = max(len(palette) - 1, 1)
-            patched["layout"]["coloraxis"]["colorscale"] = [
+            patched["layout"][axis_id]["colorscale"] = [
                 [i / steps, color] for i, color in enumerate(palette)
             ]
-            patched["layout"]["coloraxis"]["cmin"] = None if vmin is None else float(vmin)
-            patched["layout"]["coloraxis"]["cmax"] = None if vmax is None else float(vmax)
+            patched["layout"][axis_id]["cmin"] = None if vmin is None else float(vmin)
+            patched["layout"][axis_id]["cmax"] = None if vmax is None else float(vmax)
             return patched
         fig = go.Figure()
         # ------------------------------------------------------------------
@@ -1049,13 +1076,13 @@ def register_callbacks(app: dash.Dash) -> None:
                         colorscale=palette,
                         cmin=vmin,
                         cmax=vmax,
-                        coloraxis="coloraxis"
+                        coloraxis=axis_id
                     ),
                     customdata=df["point_id"].astype(np.int32).to_numpy(),
                     hovertemplate=(
-                        f"{x_axis.capitalize()}: %{{x:.2f}}<br>"
-                        f"{y_axis.capitalize()}: %{{y:.2f}}<br>"
-                        f"{color_var.replace('_', ' ').capitalize()}: "
+                        f"{variable_label(x_axis)}: %{{x:.2f}}<br>"
+                        f"{variable_label(y_axis)}: %{{y:.2f}}<br>"
+                        f"{variable_label(color_var)}: "
                         "%{marker.color:.2f}"
                         "<extra></extra>"
                     ),
@@ -1097,8 +1124,8 @@ def register_callbacks(app: dash.Dash) -> None:
                             ].tolist(),
                             name=str(class_value),
                             hovertemplate=(
-                                f"{x_axis.capitalize()}: %{{x}}<br>"
-                                f"{y_axis.capitalize()}: %{{y}}<br>"
+                                f"{variable_label(x_axis)}: %{{x}}<br>"
+                                f"{variable_label(y_axis)}: %{{y}}<br>"
                                 f"{legend_title}: %{{customdata[1]}}"
                                 "<extra></extra>"
                             ),
@@ -1127,16 +1154,16 @@ def register_callbacks(app: dash.Dash) -> None:
                             colorscale=palette,
                             cmin=vmin,
                             cmax=vmax,
-                            coloraxis="coloraxis"
+                            coloraxis=axis_id
                         ),
                         customdata=np.c_[
                             df["point_id"].astype(np.int32).to_numpy(),
                             df[color_var].to_numpy()
                         ].tolist(),
                         hovertemplate=(
-                            f"{x_axis.capitalize()}: %{{x}}<br>"
-                            f"{y_axis.capitalize()}: %{{y}}<br>"
-                            f"{color_var.replace('_', ' ').capitalize()}: "
+                            f"{variable_label(x_axis)}: %{{x}}<br>"
+                            f"{variable_label(y_axis)}: %{{y}}<br>"
+                            f"{variable_label(color_var)}: "
                             "%{customdata[1]:.2f}"
                             "<extra></extra>"
                         ),
@@ -1207,7 +1234,7 @@ def register_callbacks(app: dash.Dash) -> None:
         # -------------------------
         yticks = None
         yticktext = None
-        ylabel = y_axis.capitalize()
+        ylabel = variable_label(y_axis)
         if y_axis in df.columns:
             if y_axis == "depth":
                 if visible_yrange is not None:
@@ -1277,6 +1304,18 @@ def register_callbacks(app: dash.Dash) -> None:
         # ------------------------------------------------------------------
         # 8. Build base layout
         # ------------------------------------------------------------------
+        # Station labels sit above the plot, so the frame leaves room for them.
+        station_labels_shown = (
+            "True" in station
+            and data.stations is not None
+            and x_axis == "latitude"
+            and y_axis == "depth"
+        )
+        frame = frame_layout(
+            plot_w, plot_h, base_font,
+            bar=colorbar_pos if color_mode == "continuous" else None,
+            top_extra=(35 + int(base_font) + 8) if station_labels_shown else 0,
+        )
         layout_kwargs = dict(
             dragmode="zoom",
             uirevision=f"{dataset}-{csv_file}",
@@ -1284,7 +1323,7 @@ def register_callbacks(app: dash.Dash) -> None:
             paper_bgcolor="white",
             plot_bgcolor="white",
             xaxis=dict(
-                title=x_axis.capitalize(),
+                title=x_text or variable_label(x_axis),
                 range=x_range,
                 tickvals=xticks,
                 ticktext=xticktext,
@@ -1301,7 +1340,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 rangeslider=dict(visible=False),
             ),
             yaxis=dict(
-                title=ylabel,
+                title=y_text or ylabel,
                 range=y_range,
                 tickvals=yticks,
                 ticktext=yticktext,
@@ -1319,30 +1358,10 @@ def register_callbacks(app: dash.Dash) -> None:
         )
         # Add shared continuous color axis configuration.
         if color_mode == "continuous":
-            layout_kwargs["coloraxis"] = dict(
-                colorbar=dict(
-                    title=dict(
-                        text=(
-                            f"{color_var.replace('_', ' ').capitalize()} "
-                            f"({get_unit(color_var)})"
-                        ),
-                        side="bottom",
-                        font=dict(size=base_font + 1),
-                    ),
-                    tickfont=dict(size=base_font * 0.9),
-                    orientation="h",
-                    x=0.5,
-                    xanchor="center",
-                    y=0,
-                    yanchor="top",
-                    ypad=80,
-                    lenmode="fraction",
-                    len=0.75,
-                    thickness=15,
-                    ticks="outside",
-                    ticklabelposition="outside bottom",
-                    tickmode="auto",
-                    nticks=10,
+            layout_kwargs[axis_id] = dict(
+                colorbar=colorbar_layout(
+                    colorbar_pos, c_text or variable_label(color_var), base_font, nticks=10,
+                    frame=frame,
                 ),
                 colorscale=palette,
                 cmin=vmin,
@@ -1420,6 +1439,22 @@ def register_callbacks(app: dash.Dash) -> None:
                 annotations=station_labels,
                 shapes=station_lines
             )
+        # A range outside the data (often east/west or north/south sign) would
+        # otherwise just look like an empty plot.
+        for axis_name in {x_axis, y_axis} & set(coord_limits):
+            if axis_name not in df.columns or not has_limits(axis_name):
+                continue
+            lo, hi = sorted(coord_limits[axis_name])
+            if not df[axis_name].between(lo, hi).any():
+                fig.add_annotation(
+                    text=(
+                        f"No points between {lo:g} and {hi:g} {axis_name}. "
+                        "Use negative values for south and west (-10 = 10°S or 10°W)."
+                    ),
+                    x=0.5, y=0.5, xref="paper", yref="paper",
+                    showarrow=False, font=dict(size=14, color="red"),
+                )
+        apply_frame(fig, frame)
         return apply_selection(fig, selection, "main_plot", f"{x_axis}/{y_axis}")
     # ============================================================
     # === Time–Salinity (T–S) Diagram Update ===
@@ -1439,12 +1474,19 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('hidden_opacity', 'value'),
             Input('plot_font_size', 'value'),
             Input('cruise_track_selection_store', 'data'),
+            Input('ts_colorbar_pos', 'value'),
+            Input('ts_xlabel', 'value'),
+            Input('ts_ylabel', 'value'),
+            Input('ts_clabel', 'value'),
+            Input('ts_width', 'value'),
+            Input('ts_height', 'value'),
         ],
         State('main_plot_selected_data', 'data'),
     )
     def update_ts_plot(dataset, csv_file, sub_sample, sampling_mode,
                     color_var, color_map, size, vmin, vmax,
-                    hidden_opacity, fontsize, cruise_track_selection, selection):
+                    hidden_opacity, fontsize, cruise_track_selection, colorbar_pos,
+                    x_text, y_text, c_text, plot_w, plot_h, selection):
         # --------------------------------------------------------
         # 1️⃣ Load Data
         # --------------------------------------------------------
@@ -1452,6 +1494,7 @@ def register_callbacks(app: dash.Dash) -> None:
             return go.Figure().add_annotation(
                 text="⚠️ No CSV found", x=0.5, y=0.5, showarrow=False
             )
+        axis_id = coloraxis_name(colorbar_pos)
         df = data.load_data(dataset, csv_file, sub_sample=sub_sample, mode=sampling_mode)
         # Temperature/salinity under whatever name the file uses (t090c, sal00, ...).
         temp_col = find_alias(df.columns, "temperature")
@@ -1519,10 +1562,12 @@ def register_callbacks(app: dash.Dash) -> None:
             hovertemplate = (
                 "Salinity: %{x:.2f}<br>"
                 "Temperature: %{y:.2f} °C<br>"
-                f"{color_var}: %{{marker.color:.2f}}<extra></extra>"
+                f"{variable_label(color_var)}: %{{marker.color:.2f}}<extra></extra>"
             )
             coloraxis = dict(
-                colorscale=color_map,
+                colorscale=(
+                    get_palette(color_map)[0] if str(color_map).startswith('cmo.') else color_map
+                ),
                 cmin=vmin,
                 cmax=vmax,
             )
@@ -1556,7 +1601,7 @@ def register_callbacks(app: dash.Dash) -> None:
             hovertemplate = (
                 "Salinity: %{x:.2f}<br>"
                 "Temperature: %{y:.2f} °C<br>"
-                f"{color_var}: %{{customdata[1]}}<extra></extra>"
+                f"{variable_label(color_var)}: %{{customdata[1]}}<extra></extra>"
             )
             coloraxis = dict(
                 colorscale=discrete_scale,
@@ -1575,7 +1620,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 marker=dict(
                     size=size,
                     color=marker_color,
-                    coloraxis="coloraxis"
+                    coloraxis=axis_id
                 ),
                 customdata=customdata,
                 selected=dict(marker=dict(opacity=1)),
@@ -1614,6 +1659,7 @@ def register_callbacks(app: dash.Dash) -> None:
         # --------------------------------------------------------
         # 9️⃣ Layout
         # --------------------------------------------------------
+        frame = frame_layout(plot_w, plot_h, base_font, bar=colorbar_pos)
         fig.update_layout(
             dragmode="zoom",
             uirevision='keep',
@@ -1621,8 +1667,11 @@ def register_callbacks(app: dash.Dash) -> None:
             paper_bgcolor='white',
             plot_bgcolor='white',
             xaxis=dict(
-                title='Salinity (psu)',
+                title=x_text or 'Salinity (psu)',
                 range=[smin, smax],
+                # The Home button autoranges over every point; clip it to the
+                # percentile window so a few outliers cannot stretch the view.
+                autorangeoptions=dict(clipmin=smin, clipmax=smax),
                 tickfont=dict(size=base_font),
                 showgrid=True,
                 gridcolor='rgba(0, 0, 0, 0.1)',
@@ -1632,8 +1681,9 @@ def register_callbacks(app: dash.Dash) -> None:
                 ticks='outside'
             ),
             yaxis=dict(
-                title='Temperature (°C)',
+                title=y_text or 'Temperature (°C)',
                 range=[tmin, tmax],
+                autorangeoptions=dict(clipmin=tmin, clipmax=tmax),
                 tickfont=dict(size=base_font),
                 showgrid=True,
                 gridcolor='rgba(0, 0, 0, 0.1)',
@@ -1642,30 +1692,13 @@ def register_callbacks(app: dash.Dash) -> None:
                 mirror=True,
                 ticks='outside'
             ),
-            coloraxis=dict(
+            **{axis_id: dict(
                 **coloraxis,
-                colorbar=dict(
-                    title=dict(
-                        text=colorbar_title,
-                        side='bottom',
-                        font=dict(size=base_font + 1),
-                    ),
-                    tickfont=dict(size=base_font * 0.9),
-                    orientation='h',
-                    x=0.5,
-                    xanchor='center',
-                    y=0,
-                    yanchor='top',
-                    ypad=70,
-                    lenmode='fraction',
-                    len=0.75,
-                    thickness=15,
-                    ticks='outside',
-                    ticklabelposition="outside bottom",
-                    tickmode='auto',
-                    nticks=5,
+                colorbar=colorbar_layout(
+                    colorbar_pos, c_text or colorbar_title, base_font, nticks=5,
+                    frame=frame,
                 )
-            )
+            )}
         )
         if not numeric_color_mode:
             fig.update_coloraxes(
@@ -1675,6 +1708,7 @@ def register_callbacks(app: dash.Dash) -> None:
                     ticktext=categories,
                 )
             )
+        apply_frame(fig, frame)
         return apply_selection(fig, selection, "ts_plot", "salinity/temperature")
 
     # ============================================================
@@ -1788,6 +1822,12 @@ def register_callbacks(app: dash.Dash) -> None:
         Input('hidden_opacity', 'value'),
         Input('plot_font_size', 'value'),
         Input('cruise_track_selection_store', 'data'),
+        Input('scatter_colorbar_pos', 'value'),
+        Input('scatter_xlabel', 'value'),
+        Input('scatter_ylabel', 'value'),
+        Input('scatter_clabel', 'value'),
+        Input('scatter_width', 'value'),
+        Input('scatter_height', 'value'),
         State('scatter_fit_selected', 'value'),
         State('main_plot_selected_data', 'data'),
         State('scatter_fit_color', 'value'),
@@ -1795,7 +1835,8 @@ def register_callbacks(app: dash.Dash) -> None:
     def update_scatter_plot(dataset, csv_file, sub_sample, sampling_mode,
                             x_var, y_var, color_var, color_map, size, vmin, vmax,
                             x_min, x_max, y_min, y_max, degree,
-                            hidden_opacity, fontsize, cruise_track_selection,
+                            hidden_opacity, fontsize, cruise_track_selection, colorbar_pos,
+                            x_text, y_text, c_text, plot_w, plot_h,
                             fit_on, selection, fit_color):
         def message(text):
             fig = go.Figure().add_annotation(
@@ -1804,6 +1845,7 @@ def register_callbacks(app: dash.Dash) -> None:
             )
             return fig, None
 
+        axis_id = coloraxis_name(colorbar_pos)
         if not csv_file:
             return message("⚠️ No CSV found")
         df = _scatter_frame(dataset, csv_file, sub_sample, sampling_mode, cruise_track_selection)
@@ -1819,6 +1861,11 @@ def register_callbacks(app: dash.Dash) -> None:
         )
         marker = dict(size=size)
         coloraxis = None
+        font_px = fontsize or 14
+        frame = frame_layout(
+            plot_w, plot_h, font_px,
+            bar=colorbar_pos if (color_var and color_var != "none" and color_var in df.columns) else None,
+        )
         if color_var and color_var != "none" and color_var in df.columns:
             color_values = pd.to_numeric(df[color_var], errors="coerce")
             if vmin is None or vmax is None:
@@ -1826,25 +1873,13 @@ def register_callbacks(app: dash.Dash) -> None:
                 vmin = q[0.05] if vmin is None else vmin
                 vmax = q[0.95] if vmax is None else vmax
             palette, _ = get_palette(color_map or "Viridis")
-            marker.update(color=color_values, coloraxis="coloraxis")
+            marker.update(color=color_values, coloraxis=axis_id)
             coloraxis = dict(
                 colorscale=palette, cmin=vmin, cmax=vmax,
                 # Horizontal under the plot, like the T-S colorbar.
-                colorbar=dict(
-                    title=dict(text=_axis_label(color_var), side="bottom"),
-                    orientation="h",
-                    x=0.5,
-                    xanchor="center",
-                    y=0,
-                    yanchor="top",
-                    ypad=70,
-                    lenmode="fraction",
-                    len=0.75,
-                    thickness=15,
-                    ticks="outside",
-                    ticklabelposition="outside bottom",
-                    tickmode="auto",
-                    nticks=8,
+                colorbar=colorbar_layout(
+                    colorbar_pos, c_text or _axis_label(color_var), font_px, nticks=8,
+                    frame=frame,
                 ),
             )
             hovertemplate += f"<br>{_axis_label(color_var)}: %{{marker.color:.4g}}"
@@ -1870,13 +1905,25 @@ def register_callbacks(app: dash.Dash) -> None:
             )
         )
 
-        def axis(title, lo, hi):
+        def axis(title, var, lo, hi):
             out = dict(
                 title=title, showgrid=True, gridcolor='rgba(0, 0, 0, 0.1)',
                 showline=True, linecolor='black', mirror=True, ticks='outside',
             )
             if lo is not None and hi is not None:
-                out["range"] = [lo, hi]
+                out["range"] = sorted([lo, hi])
+            elif var not in ("depth", "latitude", "longitude"):
+                # Start (and Home/autoscale) on the 1st-99th percentile window so a
+                # few bad points cannot stretch the view; zoom out or set the
+                # limits to see them.
+                values = pd.to_numeric(df[var], errors="coerce").dropna()
+                if not values.empty:
+                    q_lo, q_hi = values.quantile([0.01, 0.99])
+                    if q_hi > q_lo:
+                        pad = 0.05 * (q_hi - q_lo)
+                        window = [float(q_lo - pad), float(q_hi + pad)]
+                        out["range"] = window
+                        out["autorangeoptions"] = dict(clipmin=window[0], clipmax=window[1])
             return out
 
         fig.update_layout(
@@ -1885,13 +1932,20 @@ def register_callbacks(app: dash.Dash) -> None:
             font=dict(size=fontsize or 14, color='black'),
             paper_bgcolor='white',
             plot_bgcolor='white',
-            margin=dict(l=70, r=20, t=20, b=60),
-            xaxis=axis(_axis_label(x_var), x_min, x_max),
-            yaxis=axis(_axis_label(y_var), y_min, y_max),
+            xaxis=axis(x_text or _axis_label(x_var), x_var, x_min, x_max),
+            yaxis=axis(y_text or _axis_label(y_var), y_var, y_min, y_max),
             shapes=_fit_shapes(fit, fit_color),
         )
         if coloraxis:
-            fig.update_layout(coloraxis=coloraxis)
+            fig.update_layout(**{axis_id: coloraxis})
+        for var, lo, hi in ((x_var, x_min, x_max), (y_var, y_min, y_max)):
+            if lo is not None and hi is not None and not df[var].between(*sorted([lo, hi])).any():
+                fig.add_annotation(
+                    text=f"No points between {min(lo, hi):g} and {max(lo, hi):g} for {_axis_label(var)}.",
+                    x=0.5, y=0.5, xref="paper", yref="paper",
+                    showarrow=False, font=dict(size=14, color="red"),
+                )
+        apply_frame(fig, frame)
         return apply_selection(fig, selection, "scatter_plot", f"{x_var}/{y_var}"), _fit_summary(fit, x_var, y_var, basis_note)
 
     # --- Callback: Refit when the selection, "On selected" or line color changes ---
@@ -1929,16 +1983,25 @@ def register_callbacks(app: dash.Dash) -> None:
     # ============================================================
     # === Vertical Profile Plot Update (Depth vs. Variable) ===
     # ============================================================
-    def _cast_style(cast_id, focus_cast):
+    def _position_label(latitude, longitude):
+        return (
+            f"{abs(latitude):.2f}{'N' if latitude >= 0 else 'S'} "
+            f"{abs(longitude):.2f}{'E' if longitude >= 0 else 'W'}"
+        )
+
+    def _cast_style(cast_id, focus_cast, position=None):
         """Line style of one cast: bold when it is the Details point's cast,
         faded when another cast is in focus."""
         is_focus = focus_cast is not None and int(cast_id) == focus_cast
         faded = focus_cast is not None and not is_focus
+        name = f"{int(cast_id)}"
+        if position:
+            name = f"{name} · {position}"
         return dict(
             width=3.5 if is_focus else (1.5 if faded else 2),
             marker_size=5 if is_focus else 4,
             opacity=0.35 if faded else 1,
-            name=f"Cast {int(cast_id)} (clicked)" if is_focus else f"Cast {int(cast_id)}",
+            name=f"{name} ●" if is_focus else name,
         )
 
     @app.callback(
@@ -1957,17 +2020,28 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('detail_point_id', 'data'),
             Input('detail_marker', 'value'),
             Input('detail_marker_color', 'value'),
+            Input('profile_legend', 'value'),
+            Input('profile_xlabel', 'value'),
+            Input('profile_ylabel', 'value'),
+            Input('profile_width', 'value'),
+            Input('profile_height', 'value'),
         ],
         State('profile_state', 'data'),
     )
     def update_profile_plot(*args):
+        plot_w, plot_h, font = args[-3], args[-2], args[6]
         result = _profile_figure(*args)
-        return result if isinstance(result, tuple) else (result, None)
+        figure, state = result if isinstance(result, tuple) else (result, None)
+        # Message figures ("select points", "no data") get the same frame.
+        if isinstance(figure, go.Figure) and figure.layout.width is None:
+            apply_frame(figure, frame_layout(plot_w, plot_h, font or 10))
+        return figure, state
 
     def _profile_figure(dataset, csv_file, sub_sample, sampling_mode,
                         color_var, color_map, fontsize,
                         selected_data, cruise_track_selection,
-                        focus_id, show_marker, marker_color, prev_state):
+                        focus_id, show_marker, marker_color, show_legend,
+                        x_text, y_text, plot_w, plot_h, prev_state):
         """
         Update the vertical profile plot.
         Behavior:
@@ -2049,7 +2123,7 @@ def register_callbacks(app: dash.Dash) -> None:
             df = df.loc[cast_numbers == focus_cast]
         elif not has_cruise_selection:
             fig.add_annotation(
-                text="Select or click points to show profiles",
+                text="Select or click points<br>to show profiles",
                 x=0.5,
                 y=0.5,
                 xref="paper",
@@ -2119,6 +2193,11 @@ def register_callbacks(app: dash.Dash) -> None:
             }
             casts = [int(c) for c in unique_casts]
             shown_focus = focus_cast if focus_cast in casts else None
+            # Median position of each cast, shown in the legend.
+            cast_positions = {
+                int(cast_id): _position_label(row["latitude"], row["longitude"])
+                for cast_id, row in df.groupby("cast")[["latitude", "longitude"]].median().iterrows()
+            }
             # Dot at the Details point's depth: always the trace after the casts.
             dot_x, dot_y = [], []
             if focus_row is not None:
@@ -2135,7 +2214,7 @@ def register_callbacks(app: dash.Dash) -> None:
             if triggered and triggered <= point_only and prev_state == state:
                 patched = Patch()
                 for i, cast_id in enumerate(casts):
-                    style = _cast_style(cast_id, shown_focus)
+                    style = _cast_style(cast_id, shown_focus, cast_positions.get(cast_id))
                     patched["data"][i]["line"]["width"] = style["width"]
                     patched["data"][i]["marker"]["size"] = style["marker_size"]
                     patched["data"][i]["opacity"] = style["opacity"]
@@ -2149,7 +2228,7 @@ def register_callbacks(app: dash.Dash) -> None:
             for cast_id, g in df.groupby("cast", dropna=True):
                 g = g.sort_values("depth")
                 color = cast_colors.get(cast_id, "rgba(0,0,0,0.6)")
-                style = _cast_style(cast_id, shown_focus)
+                style = _cast_style(cast_id, shown_focus, cast_positions.get(int(cast_id)))
                 fig.add_trace(
                     go.Scattergl(
                         x=g[color_var],
@@ -2159,14 +2238,11 @@ def register_callbacks(app: dash.Dash) -> None:
                         marker=dict(size=style["marker_size"], color=color),
                         opacity=style["opacity"],
                         name=style["name"],
-                        customdata=np.c_[g["latitude"], g["longitude"]],
                         hovertemplate=(
                             f"<b>Cast:</b> {int(cast_id)}<br>"
                             "<b>Depth:</b> %{y:.1f} m<br>"
                             f"<b>{color_var.replace('_', ' ').capitalize()}:</b> "
-                            f"%{{x:.2f}} {get_unit(color_var)}<br>"
-                            "<b>Latitude:</b> %{customdata[0]:.4f}<br>"
-                            "<b>Longitude:</b> %{customdata[1]:.4f}<br>"
+                            f"%{{x:.2f}} {get_unit(color_var)}"
                             "<extra></extra>"
                         ),
                     )
@@ -2261,11 +2337,15 @@ def register_callbacks(app: dash.Dash) -> None:
                 color="black",
                 size=fontsize if fontsize else 10,
             ),
-            legend=dict(title="Cast"),
+            showlegend=bool(show_legend),
+            legend=dict(
+                title="Cast · Position",
+                font=dict(size=(fontsize if fontsize else 10) - 1),
+            ),
         )
         fig.update_yaxes(
             autorange="reversed",
-            title="Depth (m)",
+            title=y_text or "Depth (m)",
             showgrid=True,
             gridcolor="rgba(0, 0, 0, 0.1)",
             showline=True,
@@ -2277,7 +2357,7 @@ def register_callbacks(app: dash.Dash) -> None:
             tickcolor="black",
         )
         fig.update_xaxes(
-            title=f"{color_var.replace('_', ' ').capitalize()} ({get_unit(color_var)})",
+            title=x_text or f"{color_var.replace('_', ' ').capitalize()} ({get_unit(color_var)})",
             showgrid=True,
             gridcolor="rgba(0, 0, 0, 0.1)",
             showline=True,
@@ -2288,7 +2368,13 @@ def register_callbacks(app: dash.Dash) -> None:
             tickwidth=1,
             tickcolor="black",
         )
-        return fig, state
+        legend_chars = 0
+        if show_legend:
+            entries = [len(str(t.name)) for t in fig.data if t.name and t.showlegend is not False]
+            if entries:
+                legend_chars = max(max(entries), len("Cast · Position"))
+        frame = frame_layout(plot_w, plot_h, fontsize if fontsize else 10, legend_chars=legend_chars)
+        return apply_frame(fig, frame), state
 
     # ============================================================
     # === Point Details: click a point, then step with Prev/Next ===
@@ -2351,6 +2437,381 @@ def register_callbacks(app: dash.Dash) -> None:
         if position < 0 or position >= len(ordered):
             raise dash.exceptions.PreventUpdate
         return int(ordered[position])
+
+    # ============================================================
+    # === Figure export (assets/export_figure.js) and settings record ===
+    # ============================================================
+    export_plots = {
+        "cruise_track": "Track",
+        "main_plot": "Transect",
+        "ts_plot": "T-S",
+        "profile_plot": "Profile",
+        "scatter_plot": "Scatter",
+    }
+
+    # Which dropdowns of the plot each export panel can vary: the plot's own X, Y
+    # and color (or profile variable) controls.
+    multi_slots = {
+        "main_plot": {"x": "x_axis_variable", "y": "y_axis_variable",
+                      "color": "color_variable", "cmap": "color_map",
+                      "vmin": "v_min", "vmax": "v_max",
+                      "xlabel": "main_xlabel", "ylabel": "main_ylabel", "clabel": "main_clabel"},
+        "ts_plot": {"color": "ts_color_variable", "cmap": "ts_color_map",
+                    "vmin": "ts_v_min", "vmax": "ts_v_max",
+                    "xlabel": "ts_xlabel", "ylabel": "ts_ylabel", "clabel": "ts_clabel"},
+        "scatter_plot": {"x": "scatter_x", "y": "scatter_y",
+                         "color": "scatter_color", "cmap": "scatter_color_map",
+                         "vmin": "scatter_v_min", "vmax": "scatter_v_max",
+                         "xlabel": "scatter_xlabel", "ylabel": "scatter_ylabel",
+                         "clabel": "scatter_clabel"},
+        "profile_plot": {"color": "profile_variable", "cmap": "profile_color_map",
+                         "xlabel": "profile_xlabel", "ylabel": "profile_ylabel"},
+    }
+    # Color range slots are typed numbers, empty meaning auto; the rest are dropdowns.
+    range_slots = ("vmin", "vmax")
+    # Label text for this export only; blank means the automatic label.
+    text_slots = ("xlabel", "ylabel", "clabel")
+    free_slots = range_slots + text_slots
+    option_sources = sorted({
+        component
+        for slots in multi_slots.values()
+        for slot, component in slots.items()
+        if slot not in free_slots
+    })
+    slot_names = ("x", "y", "color", "cmap") + free_slots
+    range_sources = sorted({
+        component
+        for slots in multi_slots.values()
+        for slot, component in slots.items()
+        if slot in free_slots
+    })
+
+    @app.callback(
+        Output("export-modal-backdrop", "className"),
+        Output("export_target", "data"),
+        Output("export-title", "children"),
+        Output("export-status", "children"),
+        Output("export-multi-block", "style"),
+        Output("export-multi", "value"),
+        [Input(f"export-open-{graph_id}", "n_clicks") for graph_id in export_plots]
+        + [Input("export-close-x", "n_clicks")],
+        prevent_initial_call=True,
+    )
+    def toggle_export_panel(*_clicks):
+        trigger = ctx.triggered_id
+        if trigger == "export-close-x" or not str(trigger).startswith("export-open-"):
+            return ["download-modal-backdrop hidden"] + [no_update] * 5
+        graph_id = str(trigger)[len("export-open-"):]
+        return [
+            "download-modal-backdrop",
+            graph_id,
+            f"Export figure: {export_plots.get(graph_id, graph_id)}",
+            "",
+            {} if multi_slots.get(graph_id) else {"display": "none"},
+            [],
+        ]
+
+    # One row per panel; each row has its own dropdowns for what the plot can vary.
+    slot_labels = {"x": "X", "y": "Y", "color": "Color", "cmap": "Colormap",
+                   "vmin": "Color min", "vmax": "Color max",
+                   "xlabel": "X label", "ylabel": "Y label", "clabel": "Color label"}
+
+    # The rows' dropdowns are collected into one store (a list of dicts), so the
+    # server callbacks below read plain data instead of pattern-matched values.
+    app.clientside_callback(
+        """
+        function() {
+            const rows = {};
+            const lists = window.dash_clientside.callback_context.inputs_list || [];
+            lists.forEach(function(entries) {
+                (entries || []).forEach(function(entry) {
+                    const slot = entry.id.type.replace('panel-', '');
+                    const index = entry.id.index;
+                    rows[index] = rows[index] || {id: index};
+                    rows[index][slot] = entry.value;
+                });
+            });
+            return Object.keys(rows).map(Number).sort(function(a, b) { return a - b; })
+                .map(function(key) { return rows[key]; });
+        }
+        """,
+        Output("export_rows", "data"),
+        *[Input({"type": f"panel-{slot}", "index": ALL}, "value") for slot in slot_names],
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output("export-panel-rows", "children"),
+        Input("export-modal-backdrop", "className"),
+        Input("export-panel-add", "n_clicks"),
+        Input({"type": "panel-remove", "index": ALL}, "n_clicks"),
+        State("export_target", "data"),
+        State("export_rows", "data"),
+        *[State(component, "options") for component in option_sources],
+        *[State(component, "value") for component in option_sources + range_sources],
+        prevent_initial_call=True,
+    )
+    def edit_panel_rows(open_class, _add, _removes, target, stored_rows, *states):
+        triggered = ctx.triggered_id
+        slots = multi_slots.get(target, {})
+        if "hidden" in (open_class or ""):
+            raise dash.exceptions.PreventUpdate
+        if not slots:
+            return []
+        # Newly drawn remove buttons report n_clicks=None; only real clicks count.
+        if isinstance(triggered, dict) and not (ctx.triggered and ctx.triggered[0].get("value")):
+            raise dash.exceptions.PreventUpdate
+
+        options = dict(zip(option_sources, states[: len(option_sources)]))
+        live = dict(zip(option_sources + range_sources, states[len(option_sources):]))
+        live_row = {slot: live.get(component) for slot, component in slots.items()}
+
+        rows = [dict(row) for row in (stored_rows or [])]
+        existing_ids = [row["id"] for row in rows]
+
+        next_id = max(existing_ids, default=-1) + 1
+        if triggered == "export-panel-add" and rows:
+            # A new panel keeps the variables but not the label text, which belongs to them.
+            rows.append({**rows[-1], "id": next_id, **{slot: None for slot in text_slots}})
+        elif isinstance(triggered, dict):
+            rows = [row for row in rows if row["id"] != triggered["index"]]
+        elif triggered == "export-modal-backdrop" or not rows:
+            rows = []
+        if not rows:
+            rows = [{"id": next_id, **live_row}]
+
+        children = []
+        for position, row in enumerate(rows):
+            fields = []
+            label_fields = []
+            for slot in slot_names:
+                if slot not in slots:
+                    continue
+                label = "Variable" if (target == "profile_plot" and slot == "color") else slot_labels[slot]
+                if slot in text_slots:
+                    label_fields.append(html.Div([
+                        html.Label(label),
+                        dcc.Input(
+                            id={"type": f"panel-{slot}", "index": row["id"]},
+                            type="text",
+                            value=row.get(slot),
+                            placeholder="auto",
+                        ),
+                    ], className="export-panel-field"))
+                    continue
+                if slot in range_slots:
+                    control = dcc.Input(
+                        id={"type": f"panel-{slot}", "index": row["id"]},
+                        type="number",
+                        value=row.get(slot),
+                        placeholder="auto",
+                    )
+                    field_class = "export-panel-field export-panel-range"
+                else:
+                    control = dcc.Dropdown(
+                        id={"type": f"panel-{slot}", "index": row["id"]},
+                        options=options.get(slots[slot]) or [],
+                        value=row.get(slot),
+                        clearable=False,
+                    )
+                    field_class = "export-panel-field"
+                fields.append(html.Div([html.Label(label), control], className=field_class))
+            children.append(html.Div([
+                html.Span(f"({chr(65 + position % 26)})", className="export-panel-letter"),
+                *fields,
+                html.Button(
+                    "×",
+                    id={"type": "panel-remove", "index": row["id"]},
+                    className="modal-close-button",
+                    title="Remove this panel",
+                    style={} if len(rows) > 1 else {"visibility": "hidden"},
+                ),
+                html.Details([
+                    html.Summary("Labels"),
+                    html.Div(label_fields, className="export-panel-label-fields"),
+                ], className="export-panel-labels"),
+            ], className="export-panel-row"))
+        return children
+
+    # A page preset fills the page size, which can then be edited to anything.
+    app.clientside_callback(
+        """
+        function(preset) {
+            if (!preset || preset === 'none') {
+                return [null, null];
+            }
+            return preset.split('x').map(Number);
+        }
+        """,
+        Output("export-page-w", "value"),
+        Output("export-page-h", "value"),
+        Input("export-fit", "value"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        ClientsideFunction(namespace="exportFigure", function_name="exportFigure"),
+        Output("export_sink", "data"),
+        Input("export-download-button", "n_clicks"),
+        State("export_target", "data"),
+        State("export-format", "value"),
+        State("export-width", "value"),
+        State("export-dpi", "value"),
+        State("export-background", "value"),
+        State("export-multi", "value"),
+        prevent_initial_call=True,
+    )
+
+    # The panels of a multi-panel export are composed in the browser.
+    app.clientside_callback(
+        ClientsideFunction(namespace="exportFigure", function_name="composePanels"),
+        Output("export_sink_multi", "data"),
+        Input("export_panels", "data"),
+        State("export-format", "value"),
+        State("export-width", "value"),
+        State("export-dpi", "value"),
+        State("export-background", "value"),
+        State("export-rows", "value"),
+        State("export-cols", "value"),
+        State("export-letters", "value"),
+        State("export_target", "data"),
+        State("export-multi", "value"),
+        State("export-page-w", "value"),
+        State("export-page-h", "value"),
+        State("export-margin", "value"),
+        prevent_initial_call=True,
+    )
+
+    # Controls recorded in the settings file: (section, name, component id).
+    settings_fields = [
+        ("data", "dataset", "dataset_selector"),
+        ("data", "file", "csv_selector"),
+        ("data", "bin_size", "sub_sample"),
+        ("data", "sampling_mode", "sampling_mode"),
+        ("data", "max_time_gap_s", "max_gap_seconds"),
+        ("data", "marker_size", "size"),
+        ("data", "hidden_opacity", "hidden_opacity"),
+        ("data", "font_size", "plot_font_size"),
+        ("cruise_track", "x_axis", "cruise_track_xaxis"),
+        ("cruise_track", "y_axis", "cruise_track_yaxis"),
+        ("cruise_track", "x_label", "track_xlabel"),
+        ("cruise_track", "y_label", "track_ylabel"),
+        ("main_plot", "x_axis", "x_axis_variable"),
+        ("main_plot", "y_axis", "y_axis_variable"),
+        ("main_plot", "color", "color_variable"),
+        ("main_plot", "colormap", "color_map"),
+        ("main_plot", "color_min", "v_min"),
+        ("main_plot", "color_max", "v_max"),
+        ("main_plot", "depth_min", "z_min"),
+        ("main_plot", "depth_max", "z_max"),
+        ("main_plot", "latitude_min", "lat_min"),
+        ("main_plot", "latitude_max", "lat_max"),
+        ("main_plot", "longitude_min", "lon_min"),
+        ("main_plot", "longitude_max", "lon_max"),
+        ("main_plot", "colorbar", "main_colorbar_pos"),
+        ("main_plot", "x_label", "main_xlabel"),
+        ("main_plot", "y_label", "main_ylabel"),
+        ("main_plot", "color_label", "main_clabel"),
+        ("ts_plot", "color", "ts_color_variable"),
+        ("ts_plot", "colormap", "ts_color_map"),
+        ("ts_plot", "color_min", "ts_v_min"),
+        ("ts_plot", "color_max", "ts_v_max"),
+        ("ts_plot", "colorbar", "ts_colorbar_pos"),
+        ("ts_plot", "x_label", "ts_xlabel"),
+        ("ts_plot", "y_label", "ts_ylabel"),
+        ("ts_plot", "color_label", "ts_clabel"),
+        ("profile_plot", "variable", "profile_variable"),
+        ("profile_plot", "colormap", "profile_color_map"),
+        ("profile_plot", "legend", "profile_legend"),
+        ("profile_plot", "x_label", "profile_xlabel"),
+        ("profile_plot", "y_label", "profile_ylabel"),
+        ("scatter_plot", "x", "scatter_x"),
+        ("scatter_plot", "y", "scatter_y"),
+        ("scatter_plot", "color", "scatter_color"),
+        ("scatter_plot", "colormap", "scatter_color_map"),
+        ("scatter_plot", "color_min", "scatter_v_min"),
+        ("scatter_plot", "color_max", "scatter_v_max"),
+        ("scatter_plot", "x_min", "scatter_x_min"),
+        ("scatter_plot", "x_max", "scatter_x_max"),
+        ("scatter_plot", "y_min", "scatter_y_min"),
+        ("scatter_plot", "y_max", "scatter_y_max"),
+        ("scatter_plot", "fit_degree", "scatter_fit_degree"),
+        ("scatter_plot", "colorbar", "scatter_colorbar_pos"),
+        ("scatter_plot", "x_label", "scatter_xlabel"),
+        ("scatter_plot", "y_label", "scatter_ylabel"),
+        ("scatter_plot", "color_label", "scatter_clabel"),
+    ]
+
+    @app.callback(
+        Output("export_settings_download", "data"),
+        Input("export-settings-button", "n_clicks"),
+        State("export_target", "data"),
+        State("export-format", "value"),
+        State("export-width", "value"),
+        State("export-dpi", "value"),
+        State("export-background", "value"),
+        State("url", "search"),
+        State("cruise_track_selection_store", "data"),
+        [State(component_id, "value") for _, _, component_id in settings_fields],
+        prevent_initial_call=True,
+    )
+    def download_settings(_n, target, fmt, width_in, dpi, background,
+                          url_search, track_selection, *values):
+        import json
+
+        sections: dict[str, dict] = {}
+        for (section, name, _component), value in zip(settings_fields, values):
+            if section in ("data", target):
+                sections.setdefault(section, {})[name] = value
+        selection = track_selection or {}
+        selected_ids = selection.get("selected_ids")
+        record = {
+            "figure": export_plots.get(target, target),
+            "exported_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "software": {
+                "name": "Stingray Dashboard",
+                "version": DASHBOARD_VERSION,
+                "citation": CITATION_URL,
+            },
+            "export": {
+                "format": fmt,
+                "width_in": width_in,
+                "height_in": "scaled with the width, as on screen",
+                "dpi": dpi,
+                "background": background,
+            },
+            "track_selection": (
+                f"{len(selected_ids)} points selected on the track plot"
+                if selected_ids else "all points"
+            ),
+            "settings": sections,
+            "url_parameters": (url_search or "").lstrip("?"),
+        }
+        dataset = sections.get("data", {}).get("dataset") or "dataset"
+        csv_file = sections.get("data", {}).get("file") or "file"
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{dataset}_{csv_file}_{target}_settings").strip("_")
+        return dcc.send_string(json.dumps(record, indent=2, default=str), f"{name}.json")
+
+    # The refresh button also resets every plot: Home on each graph, the
+    # cruise-track selection highlight cleared (assets/reset_view.js), and the
+    # stored selections dropped so all plots show every point again.
+    app.clientside_callback(
+        ClientsideFunction(namespace="resetView", function_name="resetAll"),
+        Output('reset_view_sink', 'data'),
+        Input('refresh-button', 'n_clicks'),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output("cruise_track_selection_store", "data", allow_duplicate=True),
+        Output("main_plot_selected_data", "data", allow_duplicate=True),
+        Input("refresh-button", "n_clicks"),
+        State("cruise_track_selection_store", "data"),
+        prevent_initial_call=True,
+    )
+    def reset_selections(_n_clicks, previous):
+        previous = previous or {}
+        return {"mode": "all", "selected_ids": None, "_key": previous.get("_key")}, None
 
     # Ring the Details point on the transect, T-S and scatter plots,
     # browser-side (assets/details.js).
@@ -2461,24 +2922,36 @@ def register_callbacks(app: dash.Dash) -> None:
             media_streams = {}
             for column in row.index:
                 column = str(column)
-                match = re.fullmatch(r"media(?:_([1-9][0-9]*))?", column)
-                if not match:
+                if column == "media":
+                    stream, frame_column = "1", "frame"
+                else:
+                    match = re.fullmatch(r"media_(.+)", column)
+                    if not match:
+                        continue
+                    stream = match.group(1)
+                    frame_column = f"frame_{stream}"
+                if stream in media_streams:
                     continue
-                stream_number = int(match.group(1) or 1)
-                if (
-                    stream_number == 1
-                    and column == "media_1"
-                    and stream_number in media_streams
-                ):
-                    continue
-                frame_column = "frame" if column == "media" else f"frame_{stream_number}"
                 label, href = make_media_link(row.get(column), row.get(frame_column))
                 if href:
-                    media_streams[stream_number] = (label, href)
+                    media_streams[stream] = (label, href)
             meta_cols = {
                 "point_id",
                 "times", "latitude", "longitude", "depth", "timestamp", "matdate",
+                "cruise", "cast",
             }
+            # Cruise and cast identify the point, so they sit with the metadata
+            # when the file has them.
+            identity_rows = []
+            cruise_value = clean(row.get("cruise"))
+            if cruise_value is not None:
+                identity_rows.append(info_row("🚢 Cruise:", str(cruise_value)))
+            cast_raw = clean(row.get("cast"))
+            cast_value = (
+                pd.to_numeric(cast_raw, errors="coerce") if cast_raw is not None else np.nan
+            )
+            if pd.notna(cast_value):
+                identity_rows.append(info_row("🔢 Cast:", str(int(round(cast_value)))))
             variable_details = []
             for var, value in row.items():
                 var = str(var)
@@ -2549,13 +3022,19 @@ def register_callbacks(app: dash.Dash) -> None:
                             href,
                             f"camera{stream_number}",
                         )
-                        for stream_number, (label, href) in sorted(media_streams.items())
+                        for stream_number, (label, href) in sorted(
+                            media_streams.items(),
+                            key=lambda item: (
+                                (0, int(item[0]), "") if item[0].isdigit() else (1, 0, item[0])
+                            ),
+                        )
                     ],
 
                     info_row("⏳ Time:", format_time(row.get("times"))),
                     info_row("🌍 Latitude:", format_number(row.get("latitude"), "°")),
                     info_row("🌍 Longitude:", format_number(row.get("longitude"), "°")),
                     info_row("🌊 Depth:", format_number(row.get("depth"), " m")),
+                    *identity_rows,
 
                     html.Hr(),
 
@@ -2564,3 +3043,71 @@ def register_callbacks(app: dash.Dash) -> None:
             )
         except Exception as e:
             return f"⚠️ Error processing click data: {str(e)}"
+
+    # ============================================================
+    # === Several panels in one figure ===
+    # ============================================================
+    # Each panel is the plot's own figure, built by the plot's own callback with
+    # the panel's variables swapped in, so it matches the plot on screen. The
+    # browser (assets/export_figure.js) then lays the panels out in a grid.
+    def _builder_dependencies(output_id, marker_input):
+        """(component id, property) of a plot callback's inputs, then its states."""
+        for key, spec in app.callback_map.items():
+            if f"{output_id}.figure" not in key:
+                continue
+            inputs = [(dep["id"], dep["property"]) for dep in spec["inputs"]]
+            if (marker_input, "value") not in inputs:
+                continue
+            return inputs + [(dep["id"], dep["property"]) for dep in spec["state"]]
+        raise RuntimeError(f"No callback builds {output_id}")
+
+    # One builder for every plot: separate callbacks with the same output and
+    # input collapse into a single registration in Dash.
+    panel_builders = {
+        "main_plot": (update_main_plot, "main_plot", "x_axis_variable"),
+        "ts_plot": (update_ts_plot, "ts_plot", "ts_color_variable"),
+        "scatter_plot": (update_scatter_plot, "scatter_plot", "scatter_x"),
+        "profile_plot": (update_profile_plot, "profile_plot", "profile_variable"),
+    }
+    panel_dependencies = {
+        target: _builder_dependencies(output_id, marker)
+        for target, (_builder, output_id, marker) in panel_builders.items()
+    }
+    panel_states = []
+    for dependency_list in panel_dependencies.values():
+        for dependency in dependency_list:
+            if dependency not in panel_states:
+                panel_states.append(dependency)
+
+    @app.callback(
+        Output("export_panels", "data", allow_duplicate=True),
+        Input("export-download-button", "n_clicks"),
+        State("export_target", "data"),
+        State("export_rows", "data"),
+        *[State(component, prop) for component, prop in panel_states],
+        prevent_initial_call=True,
+    )
+    def build_panels(n_clicks, target, rows, *values):
+        if target not in panel_builders:
+            raise dash.exceptions.PreventUpdate
+        import json
+
+        if not rows:
+            return {"error": "Add at least one panel."}
+        builder = panel_builders[target][0]
+        dependencies = panel_dependencies[target]
+        current = dict(zip(panel_states, values))
+        try:
+            figures = []
+            for row in rows:
+                args = [current[dependency] for dependency in dependencies]
+                for slot, component in multi_slots[target].items():
+                    # A blank color range means auto, whatever the plot shows.
+                    if slot in free_slots or row.get(slot) is not None:
+                        args[dependencies.index((component, "value"))] = row.get(slot) or None
+                result = builder(*args)
+                figure = result[0] if isinstance(result, tuple) else result
+                figures.append(json.loads(figure.to_json()))
+        except Exception as error:  # reported in the export dialog
+            return {"error": f"Could not build the panels: {error}"}
+        return {"figures": figures, "target": target, "stamp": n_clicks}

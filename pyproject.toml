@@ -32,6 +32,7 @@ dependencies = [
     "flask-compress>=1.13",
     "numpy>=1.26",
     "pandas>=2.0",
+    "pillow>=10",
     "plotly>=7,<8",
 ]
 
