@@ -73,6 +73,8 @@ docker run -d \
 
 ## Run from Python
 
+Python 3.11 or newer is required.
+
 ```bash
 pip install "stingray-dashboard @ git+https://github.com/WHOIGit/stingray-dashboard.git"
 stingray-dashboard --work-dir dash_data --host 0.0.0.0 --port 8050
@@ -88,23 +90,10 @@ gunicorn --bind 0.0.0.0:8050 --worker-class gthread --workers 2 --threads 4 \
 
 ## Dashboard controls
 
-- **Global options:** dataset and CSV selection, refresh, CSV download, and a
-  More menu for subsampling or averaging, opacity, marker size, font, and the
-  point marker.
-- **Plots:** cruise track, depth-vs-latitude transect, T-S diagram, vertical
-  profiles, and a scatter plot of any two numeric variables with an optional
-  linear, 2nd- or 3rd-order fit (equation, R², RMSE, n), fitted on all points
-  or on the current selection. Each plot has a toolbar; ranges, colormaps, and
-  sizes are under its More menu.
-- **Linked selection:** a box or lasso on the transect, T-S, or scatter plot
-  highlights the same points on the others; the latest selection wins. The
-  cruise track filters all plots. Profiles show the casts of the selection.
-- **Details:** click a point to see its values and camera frames, then step
-  through points in time with Prev/Next. A marker rings the point on the
-  linked plots and bolds its cast on the profile. Drag the divider to resize
-  the Details panel.
-- **Shareable state:** the URL stores the dashboard settings, so links and the
-  browser's Back button reproduce a view.
+The dashboard has a cruise track, transect, T-S, vertical profile, and scatter
+plot, with linked selection, a Details panel with camera frames, shareable URLs,
+and figure export (PNG, SVG, TIFF) with multi-panel figures that can be fitted
+to a page. See the [usage guide](docs/usage.md).
 
 When `media` and `frame` columns are present, selected observations can link to
 a compatible frame service such as
