@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stingray-dashboard"
-version = "3.3.0"
+version = "3.4.0"
 description = "Installable Dash application for the NES-LTER Stingray dashboard"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -24,11 +24,13 @@ keywords = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "dash>=4.2,<5",
+    "dash>=4.4,<5",
     "flask-compress>=1.13",
     "numpy>=1.26",
     "pandas>=2.0",
