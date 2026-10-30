@@ -151,7 +151,7 @@
   }
 
   // Each panel saved as its own file, like a single-plot export.
-  async function saveSeparately(figures, format, widthIn, dpi, background, target, say) {
+  async function saveSeparately(figures, names, format, widthIn, dpi, background, target, say) {
     const noUpdate = window.dash_clientside.no_update;
     if (!window.Plotly) {
       return noUpdate;
@@ -179,7 +179,7 @@
           ),
           layout,
         };
-        const name = `${base}_panel${index + 1}`;
+        const name = names[index] || `${base}_panel${index + 1}`;
         const heightInValue = Number(((widthInValue * height) / width).toFixed(2));
         if (format === "svg") {
           const url = await window.Plotly.toImage(figure, { format: "svg", width, height });
@@ -237,7 +237,7 @@
       return noUpdate;
     }
     if (!(mode && mode.includes("on")) || count < 2) {
-      return saveSeparately(figures, format, widthIn, dpi, background, target, say);
+      return saveSeparately(figures, store.names || [], format, widthIn, dpi, background, target, say);
     }
     try {
       let cols = Number(colsInput) > 0 ? Math.floor(Number(colsInput)) : 0;

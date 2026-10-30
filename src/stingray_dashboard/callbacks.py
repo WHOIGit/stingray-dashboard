@@ -3069,6 +3069,12 @@ def register_callbacks(app: dash.Dash) -> None:
         "scatter_plot": (update_scatter_plot, "scatter_plot", "scatter_x"),
         "profile_plot": (update_profile_plot, "profile_plot", "profile_variable"),
     }
+    panel_file_labels = {
+        "main_plot": "transect",
+        "ts_plot": "ts_temperature-salinity",
+        "scatter_plot": "scatter",
+        "profile_plot": "profile",
+    }
     panel_dependencies = {
         target: _builder_dependencies(output_id, marker)
         for target, (_builder, output_id, marker) in panel_builders.items()
@@ -3099,6 +3105,7 @@ def register_callbacks(app: dash.Dash) -> None:
         current = dict(zip(panel_states, values))
         try:
             figures = []
+            names = []
             for row in rows:
                 args = [current[dependency] for dependency in dependencies]
                 for slot, component in multi_slots[target].items():
@@ -3108,6 +3115,25 @@ def register_callbacks(app: dash.Dash) -> None:
                 result = builder(*args)
                 figure = result[0] if isinstance(result, tuple) else result
                 figures.append(json.loads(figure.to_json()))
+                # File name from this panel's own variables, like a single export.
+                chosen = [
+                    args[dependencies.index((multi_slots[target][slot], "value"))]
+                    for slot in ("x", "y", "color")
+                    if slot in multi_slots[target]
+                ]
+                config = _plot_export_config(
+                    current.get(("dataset_selector", "value")),
+                    current.get(("csv_selector", "value")),
+                    panel_file_labels[target],
+                    *chosen,
+                )
+                names.append(config["toImageButtonOptions"]["filename"])
+            # Panels with the same variables still get distinct names.
+            seen = {}
+            for position, name in enumerate(names):
+                seen[name] = seen.get(name, 0) + 1
+                if seen[name] > 1:
+                    names[position] = f"{name}_{seen[name]}"
         except Exception as error:  # reported in the export dialog
             return {"error": f"Could not build the panels: {error}"}
-        return {"figures": figures, "target": target, "stamp": n_clicks}
+        return {"figures": figures, "names": names, "target": target, "stamp": n_clicks}
