@@ -653,12 +653,17 @@ def register_callbacks(app: dash.Dash) -> None:
         Input("track_ylabel", "value"),
         Input("track_width", "value"),
         Input("track_height", "value"),
+        Input("url_restore_done", "data"),
         prevent_initial_call=True,
     )
     def draw_cruise_track(dataset, csv_file, xaxis, yaxis, fontsize, sub_sample, sampling_mode,
-                          x_text, y_text, plot_w, plot_h):
+                          x_text, y_text, plot_w, plot_h, restore_done):
+        # Wait for the URL settings to be applied, so the plot is built once.
+        if not restore_done:
+            raise dash.exceptions.PreventUpdate
         trigger = ctx.triggered_id
         if trigger not in (
+            "url_restore_done",
             "dataset_selector",   
             "csv_selector",
             "cruise_track_xaxis",
@@ -701,7 +706,7 @@ def register_callbacks(app: dash.Dash) -> None:
         fig.update_layout(
             dragmode="select",
             selectdirection="any",
-            clickmode="select",
+            clickmode="event+select",
             uirevision="cruise-track",
             font=dict(size=fontsize if fontsize else 10),
             xaxis=dict(
@@ -952,6 +957,7 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('main_width', 'value'),
             Input('main_height', 'value'),
             Input('main_plot', 'relayoutData'),
+            Input('url_restore_done', 'data'),
         ],
         State('main_plot_selected_data', 'data'),
     )
@@ -961,8 +967,11 @@ def register_callbacks(app: dash.Dash) -> None:
         vmin, vmax, zmin, zmax, latmin, latmax, lonmin, lonmax,
         hidden_opacity, fontsize, bathymetry, station,
         cruise_track_selection, colorbar_pos, x_text, y_text, c_text,
-        plot_w, plot_h, relayoutData, selection
+        plot_w, plot_h, relayoutData, restore_done, selection
     ):
+        # Wait for the URL settings to be applied, so the plot is built once.
+        if not restore_done:
+            raise dash.exceptions.PreventUpdate
         # ------------------------------------------------------------------
         # 1. Ignore irrelevant relayout events
         # ------------------------------------------------------------------
@@ -1480,13 +1489,17 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('ts_clabel', 'value'),
             Input('ts_width', 'value'),
             Input('ts_height', 'value'),
+            Input('url_restore_done', 'data'),
         ],
         State('main_plot_selected_data', 'data'),
     )
     def update_ts_plot(dataset, csv_file, sub_sample, sampling_mode,
                     color_var, color_map, size, vmin, vmax,
                     hidden_opacity, fontsize, cruise_track_selection, colorbar_pos,
-                    x_text, y_text, c_text, plot_w, plot_h, selection):
+                    x_text, y_text, c_text, plot_w, plot_h, restore_done, selection):
+        # Wait for the URL settings to be applied, so the plot is built once.
+        if not restore_done:
+            raise dash.exceptions.PreventUpdate
         # --------------------------------------------------------
         # 1️⃣ Load Data
         # --------------------------------------------------------
@@ -1828,6 +1841,7 @@ def register_callbacks(app: dash.Dash) -> None:
         Input('scatter_clabel', 'value'),
         Input('scatter_width', 'value'),
         Input('scatter_height', 'value'),
+        Input('url_restore_done', 'data'),
         State('scatter_fit_selected', 'value'),
         State('main_plot_selected_data', 'data'),
         State('scatter_fit_color', 'value'),
@@ -1836,8 +1850,11 @@ def register_callbacks(app: dash.Dash) -> None:
                             x_var, y_var, color_var, color_map, size, vmin, vmax,
                             x_min, x_max, y_min, y_max, degree,
                             hidden_opacity, fontsize, cruise_track_selection, colorbar_pos,
-                            x_text, y_text, c_text, plot_w, plot_h,
+                            x_text, y_text, c_text, plot_w, plot_h, restore_done,
                             fit_on, selection, fit_color):
+        # Wait for the URL settings to be applied, so the plot is built once.
+        if not restore_done:
+            raise dash.exceptions.PreventUpdate
         def message(text):
             fig = go.Figure().add_annotation(
                 text=text, x=0.5, y=0.5, xref="paper", yref="paper",
@@ -2025,10 +2042,16 @@ def register_callbacks(app: dash.Dash) -> None:
             Input('profile_ylabel', 'value'),
             Input('profile_width', 'value'),
             Input('profile_height', 'value'),
+            Input('url_restore_done', 'data'),
         ],
         State('profile_state', 'data'),
     )
     def update_profile_plot(*args):
+        # Wait for the URL settings to be applied, so the plot is built once.
+        *args, restore_done, prev_state = args
+        if not restore_done:
+            raise dash.exceptions.PreventUpdate
+        args.append(prev_state)
         plot_w, plot_h, font = args[-3], args[-2], args[6]
         result = _profile_figure(*args)
         figure, state = result if isinstance(result, tuple) else (result, None)

@@ -240,26 +240,54 @@
       return saveSeparately(figures, store.names || [], format, widthIn, dpi, background, target, say);
     }
     try {
+      const GAP = 12; // CSS px between panels
+      const sizes = figures.map((figure) => ({
+        w: (figure.layout && figure.layout.width) || 600,
+        h: (figure.layout && figure.layout.height) || 450,
+      }));
+
       let cols = Number(colsInput) > 0 ? Math.floor(Number(colsInput)) : 0;
       let rows = Number(rowsInput) > 0 ? Math.floor(Number(rowsInput)) : 0;
-      if (!cols && !rows) {
-        cols = Math.ceil(Math.sqrt(count));
-        rows = Math.ceil(count / cols);
-      } else if (!cols) {
-        cols = Math.ceil(count / rows);
-      } else if (!rows) {
-        rows = Math.ceil(count / cols);
+      if (!cols || !rows) {
+        // Auto: choose the grid whose overall shape best matches the output
+        // (the page's usable area, else a mildly landscape image) without
+        // leaving many empty cells. Wide targets get more columns, tall ones
+        // more rows.
+        let target = 4 / 3;
+        const pw = Number(pageWidth);
+        const ph = Number(pageHeight);
+        if (pw > 0 && ph > 0) {
+          const m = Number(margin) >= 0 ? Number(margin) : 0.5;
+          if (pw - 2 * m > 0 && ph - 2 * m > 0) {
+            target = (pw - 2 * m) / (ph - 2 * m);
+          }
+        }
+        const avgW = sizes.reduce((sum, s) => sum + s.w, 0) / count;
+        const avgH = sizes.reduce((sum, s) => sum + s.h, 0) / count;
+        let best = null;
+        for (let r = 1; r <= count; r += 1) {
+          const c = Math.ceil(count / r);
+          if ((rows && r !== rows) || (cols && c !== cols && cols * r < count)) {
+            continue;
+          }
+          const useCols = cols || c;
+          const aspect = (useCols * (avgW + GAP)) / (r * (avgH + GAP));
+          const empty = (r * useCols - count) / (r * useCols);
+          const score = Math.abs(Math.log(aspect / target)) + 2 * empty;
+          if (!best || score < best.score) {
+            best = { score, rows: r, cols: useCols };
+          }
+        }
+        if (best) {
+          rows = best.rows;
+          cols = best.cols;
+        }
       }
       if (rows * cols < count) {
         say(`${rows} × ${cols} cells cannot hold ${count} panels.`);
         return noUpdate;
       }
 
-      const GAP = 12; // CSS px between panels
-      const sizes = figures.map((figure) => ({
-        w: (figure.layout && figure.layout.width) || 600,
-        h: (figure.layout && figure.layout.height) || 450,
-      }));
       const colWidth = new Array(cols).fill(0);
       const rowHeight = new Array(rows).fill(0);
       sizes.forEach((size, index) => {

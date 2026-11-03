@@ -414,7 +414,7 @@ def make_layout() -> html.Div:
                     ),
                     html.Div([
                         html.Div([
-                            html.Label('Rows × columns:'),
+                            html.Label('Rows × columns (blank = auto):'),
                             html.Div([
                                 dcc.Input(id='export-rows', type='number', min=1, step=1, placeholder='auto'),
                                 html.Span('×', className='range-sep'),
