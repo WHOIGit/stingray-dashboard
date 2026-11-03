@@ -82,7 +82,7 @@ docker run -d \
   -p 8050:8050 \
   -v "$(pwd)/dash_data:/dash_data:ro" \
   -e GUNICORN_CMD_ARGS="--worker-class gthread --workers 2 --threads 4 --timeout 120" \
-  ghcr.io/whoigit/stingray-dashboard:3.4.0
+  ghcr.io/whoigit/stingray-dashboard:3.4.1
 ```
 
 ## Run from Python
